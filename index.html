@@ -1279,7 +1279,8 @@
       }
 
       function buildCircleModeGrids() {
-        const grids = [];
+        const cosGrids = [];
+        const sinGrids = [];
         const N = FIELD_SIZE;
         const rArr = new Float32Array(N * N);
         const tArr = new Float32Array(N * N);
@@ -1294,30 +1295,39 @@
         }
 
         for (const mode of CIRCLE_MODES) {
-          const grid = new Float32Array(N * N);
+          const cGrid = new Float32Array(N * N);
+          const sGrid = new Float32Array(N * N);
           let maxAbs = 0;
           const { n, k } = mode;
           for (let idx = 0; idx < N * N; idx++) {
             const r = rArr[idx];
             if (r > 1.02) {
-              grid[idx] = 0;
+              cGrid[idx] = 0;
+              sGrid[idx] = 0;
               continue;
             }
-            const val = besselJ(n, k * r) * (n === 0 ? 1 : Math.cos(n * tArr[idx]));
-            grid[idx] = val;
-            const a = Math.abs(val);
+            const jVal = besselJ(n, k * r);
+            const cv = jVal * (n === 0 ? 1 : Math.cos(n * tArr[idx]));
+            const sv = n === 0 ? jVal : jVal * Math.sin(n * tArr[idx]);
+            cGrid[idx] = cv;
+            sGrid[idx] = sv;
+            const a = Math.abs(cv);
             if (a > maxAbs) maxAbs = a;
           }
           if (maxAbs > 0) {
-            for (let idx = 0; idx < grid.length; idx++) grid[idx] /= maxAbs;
+            for (let idx = 0; idx < cGrid.length; idx++) {
+              cGrid[idx] /= maxAbs;
+              sGrid[idx] /= maxAbs;
+            }
           }
-          grids.push(grid);
+          cosGrids.push(cGrid);
+          sinGrids.push(sGrid);
         }
-        return grids;
+        return { cosGrids, sinGrids };
       }
 
       const squareModeGrids = buildSquareModeGrids();
-      const circleModeGrids = buildCircleModeGrids();
+      const { cosGrids: circleModeGrids, sinGrids: circleSinGrids } = buildCircleModeGrids();
 
       // ============================================================
       // 3. 状态与高 Q 值物理振场合成
@@ -1751,14 +1761,154 @@
         }
       }
 
-      // 音乐频谱 → 克拉尼物理共振模态追踪引擎
+      // ============================================================
+      // 三频段复音物理干涉引擎（低音骨架 + 中音主体 + 高音精细纹理 + 防重复演进）
+      // ============================================================
       const musicTracker = {
-        avgBass: 0,
-        lastSwitchTime: 0,
-        lockedModeIdx: 3,
-        smoothFreq: 660,
-        lastFieldUpdateTime: 0
+        // 自适应慢速均值（AGC），让任意曲风都能跑满全频段图案空间
+        avgBass: 0.15,
+        avgMid: 0.15,
+        avgHigh: 0.08,
+        avgCentroid: 600,
+        // 当前与目标三轨模态索引（低/中/高）
+        lowIdx: 1,
+        midIdx: 6,
+        highIdx: 14,
+        prevLowIdx: 0,
+        prevMidIdx: 4,
+        prevHighIdx: 11,
+        morphT: 1.0, // 0 -> 1 平滑形变进度
+        // 相位与圆板简并模态缓旋角
+        midPhase: 1,
+        highPhase: -1,
+        rotAngle: 0,
+        // 防重复历史队列
+        recentMids: [],
+        lastBeatSwitchTime: 0,
+        lastHighSwitchTime: 0,
+        lastAutoEvolveTime: 0,
+        lastFieldUpdateTime: 0,
+        smoothBassW: 0.35,
+        smoothMidW: 0.55,
+        smoothHighW: 0.25
       };
+
+      function pickFreshIndex(minIdx, maxIdx, avoidSet, preferredIdx) {
+        const span = Math.max(1, maxIdx - minIdx + 1);
+        // 优先从 preferredIdx 附近找一个未在最近历史中出现过的模态
+        let best = preferredIdx;
+        let bestScore = -Infinity;
+        for (let idx = minIdx; idx <= maxIdx; idx++) {
+          const isRecent = avoidSet.includes(idx);
+          const dist = Math.abs(idx - preferredIdx);
+          // 既贴合当前音色频段，又强烈惩罚刚用过的模态，并加入轻微探索随机性
+          const score = -dist * 0.42 + (isRecent ? -6.5 : 0) + Math.random() * 2.2;
+          if (score > bestScore) {
+            bestScore = score;
+            best = idx;
+          }
+        }
+        return Math.max(minIdx, Math.min(maxIdx, best));
+      }
+
+      function formatModeShort(mode, isSquare) {
+        return isSquare
+          ? `(${mode.m},${mode.n})${mode.sign > 0 ? '+' : '-'}`
+          : `J${mode.n},${mode.m}`;
+      }
+
+      function computePolyphonicMusicField(wLow, wMid, wHigh) {
+        const isSquare = state.shape === 'square';
+        const modes = isSquare ? SQUARE_MODES : CIRCLE_MODES;
+        const grids = isSquare ? squareModeGrids : circleModeGrids;
+        const maxM = modes.length - 1;
+        const len = FIELD_SIZE * FIELD_SIZE;
+
+        const curL = Math.min(musicTracker.lowIdx, maxM);
+        const curM = Math.min(musicTracker.midIdx, maxM);
+        const curH = Math.min(musicTracker.highIdx, maxM);
+        const oldL = Math.min(musicTracker.prevLowIdx, maxM);
+        const oldM = Math.min(musicTracker.prevMidIdx, maxM);
+        const oldH = Math.min(musicTracker.prevHighIdx, maxM);
+
+        // 平滑形变曲线 (smoothstep)
+        const t = Math.min(1, Math.max(0, musicTracker.morphT));
+        const s = t * t * (3 - 2 * t);
+        const invS = 1 - s;
+
+        const gCurL = grids[curL], gCurM = grids[curM], gCurH = grids[curH];
+        const gOldL = grids[oldL], gOldM = grids[oldM], gOldH = grids[oldH];
+
+        const pMid = musicTracker.midPhase;
+        const pHigh = musicTracker.highPhase;
+
+        const rawField = new Float32Array(len);
+
+        if (isSquare) {
+          for (let i = 0; i < len; i++) {
+            const vCur = wLow * gCurL[i] + wMid * pMid * gCurM[i] + wHigh * pHigh * gCurH[i];
+            if (invS > 0.005) {
+              const vOld = wLow * gOldL[i] + wMid * pMid * gOldM[i] + wHigh * pHigh * gOldH[i];
+              rawField[i] = vOld * invS + vCur * s;
+            } else {
+              rawField[i] = vCur;
+            }
+          }
+        } else {
+          // 圆形板：利用 cos(n*theta)*cos(phi) + sin(n*theta)*sin(phi) 实现物理简并模态平滑旋进！
+          const sCurM = circleSinGrids[curM];
+          const sCurH = circleSinGrids[curH];
+          const cosR1 = Math.cos(musicTracker.rotAngle);
+          const sinR1 = Math.sin(musicTracker.rotAngle);
+          const cosR2 = Math.cos(-musicTracker.rotAngle * 1.35);
+          const sinR2 = Math.sin(-musicTracker.rotAngle * 1.35);
+
+          for (let i = 0; i < len; i++) {
+            const mRot = gCurM[i] * cosR1 + sCurM[i] * sinR1;
+            const hRot = gCurH[i] * cosR2 + sCurH[i] * sinR2;
+            const vCur = wLow * gCurL[i] + wMid * pMid * mRot + wHigh * pHigh * hRot;
+            if (invS > 0.005) {
+              const vOld = wLow * gOldL[i] + wMid * pMid * gOldM[i] + wHigh * pHigh * gOldH[i];
+              rawField[i] = vOld * invS + vCur * s;
+            } else {
+              rawField[i] = vCur;
+            }
+          }
+        }
+
+        // 归一化并锐化波节线，保证复音叠加依然清晰精致不糊
+        let maxVal = 0;
+        for (let i = 0; i < len; i++) {
+          const a = Math.abs(rawField[i]);
+          if (a > maxVal) maxVal = a;
+        }
+        const invMax = maxVal > 1e-5 ? 1 / maxVal : 1;
+        const gammaShape = isSquare ? 0.84 : 0.74;
+
+        for (let i = 0; i < len; i++) {
+          ampField[i] = Math.min(1, Math.pow(Math.abs(rawField[i]) * invMax, gammaShape));
+        }
+
+        const N = FIELD_SIZE;
+        for (let j = 1; j < N - 1; j++) {
+          const row = j * N;
+          for (let i = 1; i < N - 1; i++) {
+            const idx = row + i;
+            gradX[idx] = (ampField[idx + 1] - ampField[idx - 1]) * 0.5;
+            gradY[idx] = (ampField[idx + N] - ampField[idx - N]) * 0.5;
+          }
+        }
+
+        // 同步 HUD 展示当前复音叠加的主频与组合标识
+        const totalW = wLow + wMid + wHigh + 1e-5;
+        const synthFreq = Math.round((modes[curL].f * wLow + modes[curM].f * wMid + modes[curH].f * wHigh) / totalW);
+        state.freq = Math.max(MIN_FREQ, Math.min(MAX_FREQ, synthFreq));
+        state.resonanceLevel = Math.min(1, 0.72 + state.musicEnergy * 0.28);
+        state.dominantLabel = `复音 ${formatModeShort(modes[curM], isSquare)} × ${formatModeShort(modes[curH], isSquare)}`;
+        hudHz.textContent = `${state.freq} Hz`;
+        freqNumberInput.value = state.freq;
+        updateResonanceUI();
+      }
 
       function analyzeMusicAndDrive(nowMs, dt) {
         if (state.driveMode !== 'music' || !state.musicPlaying || !analyserNode || !freqBinData) {
@@ -1773,22 +1923,24 @@
         const binCount = freqBinData.length;
 
         let bassSum = 0, bassCnt = 0;
-        let totalSum = 0, totalCnt = 0;
+        let midSum = 0, midCnt = 0;
+        let highSum = 0, highCnt = 0;
         let weightedHzSum = 0, weightSum = 0;
 
         for (let i = 1; i < binCount; i++) {
           const hz = i * binHz;
-          if (hz > 4200) break;
+          if (hz > 4800) break;
           const v = freqBinData[i] / 255;
 
-          if (hz >= 55 && hz <= 220) {
-            bassSum += v;
-            bassCnt++;
+          if (hz >= 50 && hz < 240) {
+            bassSum += v; bassCnt++;
+          } else if (hz >= 240 && hz < 1300) {
+            midSum += v; midCnt++;
+          } else if (hz >= 1300 && hz <= 4600) {
+            highSum += v; highCnt++;
           }
-          if (hz >= 60 && hz <= 3800) {
-            totalSum += v;
-            totalCnt++;
-            // 用能量平方加权突出主旋律/主音色频段
+
+          if (hz >= 60 && hz <= 4000) {
             const w = v * v;
             weightedHzSum += hz * w;
             weightSum += w;
@@ -1796,63 +1948,112 @@
         }
 
         const bass = bassCnt > 0 ? bassSum / bassCnt : 0;
-        const rms = totalCnt > 0 ? totalSum / totalCnt : 0;
-        const centroidHz = weightSum > 0.001 ? weightedHzSum / weightSum : 420;
+        const mid = midCnt > 0 ? midSum / midCnt : 0;
+        const high = highCnt > 0 ? highSum / highCnt : 0;
+        const rms = bass * 0.42 + mid * 0.38 + high * 0.20;
+        const centroidHz = weightSum > 0.001 ? weightedHzSum / weightSum : musicTracker.avgCentroid;
 
-        // 动态低音基线与鼓点瞬态检测
-        musicTracker.avgBass = musicTracker.avgBass * 0.92 + bass * 0.08;
+        // 1) 自适应慢速基线（AGC），提取每个频段相对于这首歌自身的起伏
+        musicTracker.avgBass = musicTracker.avgBass * 0.94 + bass * 0.06;
+        musicTracker.avgMid = musicTracker.avgMid * 0.95 + mid * 0.05;
+        musicTracker.avgHigh = musicTracker.avgHigh * 0.95 + high * 0.05;
+        musicTracker.avgCentroid = musicTracker.avgCentroid * 0.96 + centroidHz * 0.04;
+
         const bassFlux = Math.max(0, bass - musicTracker.avgBass);
+        const highFlux = Math.max(0, high - musicTracker.avgHigh);
 
-        // 平滑更新响度包络与鼓点冲击
-        state.musicEnergy = state.musicEnergy * 0.78 + Math.min(1, rms * 2.4) * 0.22;
-        if (bassFlux > 0.085) {
-          state.beatKick = Math.min(1, state.beatKick + bassFlux * 2.8);
+        // 相对突出度：确保即使频段稳定，细微的配器变化也会驱动三轨混合比例呼吸
+        const relBass = bass / (musicTracker.avgBass + 0.06);
+        const relMid = mid / (musicTracker.avgMid + 0.05);
+        const relHigh = high / (musicTracker.avgHigh + 0.03);
+
+        state.musicEnergy = state.musicEnergy * 0.76 + Math.min(1, rms * 2.5) * 0.24;
+        if (bassFlux > 0.075) {
+          state.beatKick = Math.min(1, state.beatKick + bassFlux * 3.1);
         } else {
-          state.beatKick *= Math.pow(0.06, dt);
+          state.beatKick *= Math.pow(0.05, dt);
         }
 
-        // 将音乐频谱质心映射到一个合适的物理模态（兼顾低/中/高阶图案多样性）
+        // 圆板简并模态随音乐能量优雅缓慢旋进
+        musicTracker.rotAngle += dt * (0.14 + state.musicEnergy * 0.42);
+
+        // 2) 模态池划分（低阶骨架 / 中阶主体 / 高阶细节）
         const modes = state.shape === 'square' ? SQUARE_MODES : CIRCLE_MODES;
-        // 音乐频谱质心大多落在 200~1800 Hz，做温和对数展宽覆盖 138~3600 Hz
-        const normLog = Math.max(0, Math.min(1, (Math.log(Math.max(120, centroidHz)) - Math.log(140)) / (Math.log(2200) - Math.log(140))));
-        const mappedFreq = Math.exp(Math.log(modes[0].f) + normLog * (Math.log(modes[modes.length - 1].f) - Math.log(modes[0].f)));
+        const totalM = modes.length;
+        const lowMax = Math.floor(totalM * 0.32);
+        const midMin = Math.floor(totalM * 0.22);
+        const midMax = Math.floor(totalM * 0.74);
+        const highMin = Math.floor(totalM * 0.56);
+        const highMax = totalM - 1;
 
-        // 找到离 mappedFreq 最近的物理本征模态
-        let candidateIdx = 0;
-        let minDiff = Infinity;
-        for (let i = 0; i < modes.length; i++) {
-          const d = Math.abs(modes[i].f - mappedFreq);
-          if (d < minDiff) {
-            minDiff = d;
-            candidateIdx = i;
-          }
+        // 相对音高偏移（-1 ~ +1），映射到中阶池偏好位置
+        const pitchRatio = Math.log((centroidHz + 40) / (musicTracker.avgCentroid + 40));
+        const normPitch = Math.max(0, Math.min(1, 0.5 + pitchRatio * 1.15));
+        const prefMid = Math.round(midMin + normPitch * (midMax - midMin));
+        const prefLow = Math.round(Math.min(lowMax, Math.max(0, (relBass - 0.6) * lowMax)));
+        const prefHigh = Math.round(highMin + Math.min(1, Math.max(0, (relHigh - 0.55) * 0.9)) * (highMax - highMin));
+
+        // 3) 节拍/乐句触发新复音组合演进（带防重复历史队列）
+        const sinceBeat = nowMs - musicTracker.lastBeatSwitchTime;
+        const sinceHigh = nowMs - musicTracker.lastHighSwitchTime;
+        const sinceAuto = nowMs - musicTracker.lastAutoEvolveTime;
+
+        const triggerBeatEvolve = bassFlux > 0.095 && sinceBeat > 820 && rms > 0.07;
+        const triggerPhraseEvolve = sinceAuto > 2600 && rms > 0.06;
+        const triggerHighSparkle = highFlux > 0.065 && sinceHigh > 1100 && rms > 0.07;
+
+        let evolved = false;
+
+        if (triggerBeatEvolve || triggerPhraseEvolve) {
+          musicTracker.prevLowIdx = musicTracker.lowIdx;
+          musicTracker.prevMidIdx = musicTracker.midIdx;
+          musicTracker.prevHighIdx = musicTracker.highIdx;
+
+          const nextMid = pickFreshIndex(midMin, midMax, musicTracker.recentMids, prefMid);
+          musicTracker.midIdx = nextMid;
+          musicTracker.lowIdx = pickFreshIndex(0, lowMax, [musicTracker.lowIdx], prefLow);
+          // 偶尔同时翻转叠加相位，创造全新的拓扑对称反转
+          if (Math.random() < 0.45) musicTracker.midPhase *= -1;
+
+          musicTracker.recentMids.push(nextMid);
+          if (musicTracker.recentMids.length > 7) musicTracker.recentMids.shift();
+
+          musicTracker.morphT = 0;
+          musicTracker.lastBeatSwitchTime = nowMs;
+          musicTracker.lastAutoEvolveTime = nowMs;
+          evolved = true;
         }
 
-        // 节拍锁模：满足冷却时间 + (强鼓点冲击 或 频段显著跃迁) 时切换锁定模态，保证沙粒有足够时间聚出清晰几何图
-        const elapsedSinceSwitch = nowMs - musicTracker.lastSwitchTime;
-        const modeJump = Math.abs(candidateIdx - musicTracker.lockedModeIdx);
-        const strongBeat = bassFlux > 0.115 && elapsedSinceSwitch > 680;
-        const melodicShift = modeJump >= 2 && elapsedSinceSwitch > 950 && rms > 0.08;
-
-        if (strongBeat || melodicShift) {
-          // 鼓点触发时如果刚好还在同一模态，则顺延相邻模态让视觉有明显节奏换图感
-          if (candidateIdx === musicTracker.lockedModeIdx && strongBeat) {
-            const stepDir = bass > 0.52 ? 1 : -1;
-            candidateIdx = Math.max(0, Math.min(modes.length - 1, candidateIdx + stepDir));
-          }
-          musicTracker.lockedModeIdx = candidateIdx;
-          musicTracker.lastSwitchTime = nowMs;
+        if (triggerHighSparkle && !evolved) {
+          musicTracker.prevLowIdx = musicTracker.lowIdx;
+          musicTracker.prevMidIdx = musicTracker.midIdx;
+          musicTracker.prevHighIdx = musicTracker.highIdx;
+          musicTracker.highIdx = pickFreshIndex(highMin, highMax, [musicTracker.highIdx], prefHigh);
+          if (Math.random() < 0.5) musicTracker.highPhase *= -1;
+          musicTracker.morphT = 0.25;
+          musicTracker.lastHighSwitchTime = nowMs;
         }
 
-        const lockedMode = modes[Math.min(musicTracker.lockedModeIdx, modes.length - 1)];
-        // 目标频率向锁定模态丝滑靠拢（保留极轻微音乐律动偏移）
-        const targetF = lockedMode.f + (mappedFreq - lockedMode.f) * 0.08;
-        musicTracker.smoothFreq += (targetF - musicTracker.smoothFreq) * Math.min(1, dt * 6.5);
+        // 平滑推进形变与三轨能量混合比例
+        musicTracker.morphT = Math.min(1, musicTracker.morphT + dt * 1.9);
 
-        // 节流重算振场（每秒最多 ~22 次），兼顾 60fps 丝滑和极低 CPU 占用
-        if (nowMs - musicTracker.lastFieldUpdateTime > 45 && Math.abs(musicTracker.smoothFreq - state.freq) >= 1) {
+        const targetLowW = 0.22 + Math.min(0.68, relBass * 0.34);
+        const targetMidW = 0.42 + Math.min(0.62, relMid * 0.32);
+        const targetHighW = 0.14 + Math.min(0.58, relHigh * 0.28);
+
+        const lerpRate = Math.min(1, dt * 6.0);
+        musicTracker.smoothBassW += (targetLowW - musicTracker.smoothBassW) * lerpRate;
+        musicTracker.smoothMidW += (targetMidW - musicTracker.smoothMidW) * lerpRate;
+        musicTracker.smoothHighW += (targetHighW - musicTracker.smoothHighW) * lerpRate;
+
+        // 节流刷新复音干涉振场（~24 Hz 刷新，丝滑且低功耗）
+        if (nowMs - musicTracker.lastFieldUpdateTime > 40) {
           musicTracker.lastFieldUpdateTime = nowMs;
-          setFrequency(musicTracker.smoothFreq, false, false);
+          computePolyphonicMusicField(
+            musicTracker.smoothBassW,
+            musicTracker.smoothMidW,
+            musicTracker.smoothHighW
+          );
         }
       }
 
