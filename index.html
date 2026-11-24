@@ -1162,18 +1162,13 @@
         const isCircle = state.shape === 'circle';
         for (let i = 0; i < PARTICLE_COUNT; i++) {
           if (isCircle) {
-            const r = Math.sqrt(Math.random() * (0.975 * 0.975 - 0.05 * 0.05) + 0.05 * 0.05);
+            const r = Math.sqrt(Math.random()) * 0.975;
             const theta = Math.random() * Math.PI * 2;
             px[i] = r * Math.cos(theta);
             py[i] = r * Math.sin(theta);
           } else {
-            let x, y;
-            do {
-              x = (Math.random() * 2 - 1) * 0.985;
-              y = (Math.random() * 2 - 1) * 0.985;
-            } while (x * x + y * y < 0.05 * 0.05);
-            px[i] = x;
-            py[i] = y;
+            px[i] = (Math.random() * 2 - 1) * 0.985;
+            py[i] = (Math.random() * 2 - 1) * 0.985;
           }
           pShade[i] = 0.78 + Math.random() * 0.22;
         }
@@ -1212,7 +1207,6 @@
         const freqScale = 0.85 + 0.35 * (1 - Math.log(state.freq / MIN_FREQ) / Math.log(MAX_FREQ / MIN_FREQ));
         const maxJump = 0.024 * energy * freqScale;
         const driftGain = 0.042 * energy;
-        const centerBoltR2 = 0.046 * 0.046;
 
         for (let i = 0; i < PARTICLE_COUNT; i++) {
           let x = px[i];
@@ -1228,14 +1222,8 @@
           x += (Math.random() - 0.5) * 2 * stochastic - gradX[idx] * driftGain * a;
           y += (Math.random() - 0.5) * 2 * stochastic - gradY[idx] * driftGain * a;
 
-          const r2 = x * x + y * y;
-          if (r2 < centerBoltR2 && r2 > 1e-8) {
-            const invR = 0.047 / Math.sqrt(r2);
-            x *= invR;
-            y *= invR;
-          }
-
           if (isCircle) {
+            const r2 = x * x + y * y;
             if (r2 > 0.975 * 0.975) {
               const r = Math.sqrt(r2);
               const clampR = 0.972 - Math.random() * 0.015;
@@ -1373,54 +1361,6 @@
         bgCtx.restore();
       }
 
-      function drawCenterBolt() {
-        ctx.save();
-        ctx.translate(CENTER, CENTER);
-
-        ctx.beginPath();
-        ctx.arc(0, 2, 16, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-        ctx.fill();
-
-        const washerGrad = ctx.createLinearGradient(-15, -15, 15, 15);
-        washerGrad.addColorStop(0, '#6a707c');
-        washerGrad.addColorStop(0.5, '#3b4049');
-        washerGrad.addColorStop(1, '#1d2026');
-        ctx.beginPath();
-        ctx.arc(0, 0, 14.5, 0, Math.PI * 2);
-        ctx.fillStyle = washerGrad;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        const capGrad = ctx.createRadialGradient(-3, -3, 1, 0, 0, 10);
-        capGrad.addColorStop(0, '#cfd5de');
-        capGrad.addColorStop(0.55, '#7e8694');
-        capGrad.addColorStop(1, '#393e47');
-        ctx.beginPath();
-        ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
-        ctx.fillStyle = capGrad;
-        ctx.fill();
-
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const a = (Math.PI / 3) * i - Math.PI / 6;
-          const hx = Math.cos(a) * 4.5;
-          const hy = Math.sin(a) * 4.5;
-          if (i === 0) ctx.moveTo(hx, hy);
-          else ctx.lineTo(hx, hy);
-        }
-        ctx.closePath();
-        ctx.fillStyle = '#14161a';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-        ctx.lineWidth = 0.7;
-        ctx.stroke();
-
-        ctx.restore();
-      }
-
       function renderSandFrame() {
         densityMap.fill(0);
         sandBuffer32.fill(0);
@@ -1457,7 +1397,6 @@
         ctx.clearRect(0, 0, W, H);
         ctx.drawImage(bgCanvas, 0, 0);
         ctx.drawImage(sandCanvas, 0, 0);
-        drawCenterBolt();
       }
 
       // ============================================================
