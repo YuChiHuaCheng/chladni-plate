@@ -1,0 +1,1839 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>克拉尼音波成图 · Chladni Plate</title>
+  <style>
+    :root {
+      --bg-app: #0a0b0e;
+      --bg-drawer: rgba(18, 20, 25, 0.90);
+      --bg-control: rgba(255, 255, 255, 0.05);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text-primary: #eef0f4;
+      --text-secondary: #98a0ad;
+      --text-muted: #5d6472;
+      --accent: #e6b873;
+      --resonance-high: #63d297;
+      --mono: "SFMono-Regular", "JetBrains Mono", "Menlo", "Consolas", monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-app);
+      color: var(--text-primary);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at 50% 44%, rgba(36, 40, 50, 0.34) 0%, rgba(10, 11, 14, 0) 58%),
+        var(--bg-app);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 暗室边缘暗角 */
+    .vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 46%, transparent 44%, rgba(0, 0, 0, 0.62) 100%);
+      z-index: 1;
+    }
+
+    /* 右上角极简设置按钮 */
+    .settings-trigger {
+      position: fixed;
+      top: 22px;
+      right: 24px;
+      z-index: 20;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      background: rgba(20, 22, 27, 0.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: rgba(238, 240, 244, 0.62);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.22s ease;
+    }
+
+    .settings-trigger:hover {
+      color: var(--text-primary);
+      border-color: rgba(255, 255, 255, 0.22);
+      background: rgba(32, 35, 43, 0.78);
+      transform: rotate(22deg);
+    }
+
+    .settings-trigger[aria-expanded="true"] {
+      color: var(--accent);
+      border-color: rgba(230, 184, 115, 0.45);
+      background: rgba(230, 184, 115, 0.12);
+    }
+
+    .settings-trigger svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.75;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    /* 主舞台：最大化展开声波图 + 底部悬浮极简滑块 */
+    .stage {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 16px 56px;
+    }
+
+    .plate-housing {
+      position: relative;
+      width: min(86vh, 94vw, 860px);
+      height: min(86vh, 94vw, 860px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    canvas#plateCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* 底部极简贴合背景的悬浮滑动条容器 */
+    .tuner-dock {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 12;
+      width: min(460px, 78vw);
+      padding-top: 34px; /* 为按需浮现的 HUD 预留稳定空间 */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* 仅在滑动/调频时显示的频率与属性 HUD */
+    .tuner-hud {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%) translateY(6px);
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: rgba(16, 18, 22, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.28s ease, transform 0.28s ease;
+      white-space: nowrap;
+    }
+
+    .tuner-dock.active .tuner-hud {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .hud-hz {
+      font-family: var(--mono);
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+    }
+
+    .hud-sep {
+      width: 1px;
+      height: 11px;
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .hud-mode {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: rgba(238, 240, 244, 0.78);
+    }
+
+    .hud-resonance {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .hud-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+
+    .hud-dot.locked {
+      background: var(--resonance-high);
+      box-shadow: 0 0 8px rgba(99, 210, 151, 0.65);
+    }
+
+    .hud-dot.mid {
+      background: var(--accent);
+    }
+
+    /* 贴合暗室声波图背景的纤细滑轨 */
+    .slider-track-wrap {
+      position: relative;
+      width: 100%;
+      height: 28px;
+      display: flex;
+      align-items: center;
+    }
+
+    /* 轨道背景细线 + 动态共振微光 */
+    .slider-rail {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 2px;
+      border-radius: 99px;
+      background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.07) 0%,
+        rgba(255, 255, 255, 0.16) 50%,
+        rgba(255, 255, 255, 0.07) 100%
+      );
+      pointer-events: none;
+    }
+
+    .slider-progress {
+      position: absolute;
+      left: 0;
+      height: 2px;
+      width: 50%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, rgba(230, 184, 115, 0.12), rgba(230, 184, 115, 0.65));
+      pointer-events: none;
+      opacity: 0.45;
+      transition: opacity 0.25s ease;
+    }
+
+    .tuner-dock.active .slider-progress,
+    .tuner-dock:hover .slider-progress {
+      opacity: 1;
+    }
+
+    input[type="range"]#freqSlider {
+      -webkit-appearance: none;
+      appearance: none;
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 28px;
+      background: transparent;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]#freqSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #cfd5de;
+      border: 2px solid #0e1014;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 2px 10px rgba(0, 0, 0, 0.75);
+      cursor: grab;
+      transition: transform 0.15s ease, background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    input[type="range"]#freqSlider:hover::-webkit-slider-thumb {
+      transform: scale(1.14);
+      background: #eef0f4;
+    }
+
+    input[type="range"]#freqSlider:active::-webkit-slider-thumb {
+      cursor: grabbing;
+      transform: scale(1.24);
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(230, 184, 115, 0.16), 0 2px 12px rgba(0, 0, 0, 0.85);
+    }
+
+    input[type="range"]#freqSlider::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #cfd5de;
+      border: 2px solid #0e1014;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 2px 10px rgba(0, 0, 0, 0.75);
+      cursor: grab;
+      transition: transform 0.15s ease, background 0.2s ease;
+    }
+
+    /* ============================================================
+       右侧弹出式设置侧边栏（Drawer）
+       ============================================================ */
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      background: rgba(0, 0, 0, 0.42);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+
+    .drawer-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 40;
+      width: min(360px, 90vw);
+      background: var(--bg-drawer);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      border-left: 1px solid var(--border-subtle);
+      box-shadow: -18px 0 48px rgba(0, 0, 0, 0.6);
+      transform: translateX(100%);
+      transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      height: 58px;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .drawer-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .drawer-title span {
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    .drawer-close {
+      width: 32px;
+      height: 32px;
+      border-radius: 7px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+    .drawer-close:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-primary);
+    }
+
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 20px 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    /* 分段切换器 */
+    .segmented {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 4px;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border-subtle);
+      border-radius: 9px;
+    }
+
+    .segmented button {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-secondary);
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .segmented button.active {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: var(--border-strong);
+      color: var(--text-primary);
+    }
+
+    /* 抽屉内频率读数卡 */
+    .freq-card {
+      background: rgba(0, 0, 0, 0.38);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 13px 14px;
+    }
+
+    .freq-top-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .freq-input-wrap {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+    }
+
+    #freqNumberInput {
+      width: 118px;
+      background: transparent;
+      border: none;
+      outline: none;
+      font-family: var(--mono);
+      font-size: 30px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: -0.02em;
+    }
+
+    #freqNumberInput::-webkit-inner-spin-button,
+    #freqNumberInput::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    .freq-unit {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .mode-badge {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      white-space: nowrap;
+    }
+
+    .resonance-row {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .resonance-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--text-muted);
+    }
+
+    .resonance-status.locked {
+      color: var(--resonance-high);
+    }
+
+    .resonance-bar-bg {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .resonance-bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #64748b 0%, #e6b873 60%, #63d297 100%);
+      transition: width 0.12s ease-out;
+    }
+
+    .nudge-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
+    .btn {
+      background: var(--bg-control);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-primary);
+      border-radius: 7px;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-family: var(--sans);
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.08s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .btn:hover {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: var(--border-strong);
+    }
+
+    .btn:active {
+      transform: translateY(1px);
+    }
+
+    .btn-mono {
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 6px 4px;
+    }
+
+    .btn-active {
+      background: rgba(230, 184, 115, 0.14);
+      border-color: rgba(230, 184, 115, 0.52);
+      color: var(--accent);
+    }
+
+    .btn-active:hover {
+      background: rgba(230, 184, 115, 0.22);
+    }
+
+    .action-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .param-row {
+      display: grid;
+      grid-template-columns: 60px 1fr 38px;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .param-row .val {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: right;
+    }
+
+    .param-row input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 99px;
+      background: rgba(255, 255, 255, 0.12);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .param-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: #e2e6ed;
+      border: 2px solid #121419;
+      cursor: pointer;
+    }
+
+    .presets-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+    }
+
+    .preset-btn {
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid var(--border-subtle);
+      border-radius: 7px;
+      padding: 8px 10px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .preset-btn:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: var(--border-strong);
+    }
+
+    .preset-btn.current {
+      background: rgba(230, 184, 115, 0.12);
+      border-color: rgba(230, 184, 115, 0.52);
+    }
+
+    .preset-hz {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .preset-btn.current .preset-hz {
+      color: var(--accent);
+    }
+
+    .preset-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border-subtle);
+    }
+
+    .hint-box {
+      font-size: 11px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    .hint-box kbd {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+    }
+
+    @media (max-width: 640px) {
+      .settings-trigger {
+        top: 16px;
+        right: 16px;
+      }
+      .stage {
+        padding: 12px 10px 64px;
+      }
+      .plate-housing {
+        width: min(82vh, 96vw, 560px);
+        height: min(82vh, 96vw, 560px);
+      }
+      .tuner-dock {
+        bottom: 18px;
+        width: min(84vw, 400px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="vignette"></div>
+
+  <!-- 右上角唯一设置入口 -->
+  <button
+    id="settingsBtn"
+    class="settings-trigger"
+    type="button"
+    title="打开设置"
+    aria-label="打开设置面板"
+    aria-expanded="false"
+  >
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+    </svg>
+  </button>
+
+  <!-- 极简主舞台：声波图 + 底部贴合背景的调频滑块 -->
+  <main class="stage">
+    <div class="plate-housing">
+      <canvas id="plateCanvas" width="860" height="860"></canvas>
+    </div>
+
+    <div class="tuner-dock" id="tunerDock">
+      <div class="tuner-hud" id="tunerHud" aria-live="polite">
+        <span class="hud-hz" id="hudHz">660 Hz</span>
+        <span class="hud-sep"></span>
+        <span class="hud-mode" id="hudMode">Mode (2,1)-</span>
+        <span class="hud-sep"></span>
+        <span class="hud-resonance">
+          <span class="hud-dot locked" id="hudDot"></span>
+          <span id="hudResText">强共振</span>
+        </span>
+      </div>
+
+      <div class="slider-track-wrap">
+        <div class="slider-rail"></div>
+        <div class="slider-progress" id="sliderProgress"></div>
+        <input
+          id="freqSlider"
+          type="range"
+          min="0"
+          max="1000"
+          step="1"
+          value="512"
+          aria-label="声波频率调节 (100 - 4000 Hz)"
+        />
+      </div>
+    </div>
+  </main>
+
+  <!-- 侧边栏遮罩与抽屉 -->
+  <div id="drawerBackdrop" class="drawer-backdrop"></div>
+  <aside id="settingsDrawer" class="drawer" aria-hidden="true">
+    <div class="drawer-header">
+      <div class="drawer-title">
+        实验台设置
+        <span>CHLADNI</span>
+      </div>
+      <button id="drawerCloseBtn" class="drawer-close" type="button" aria-label="关闭设置">×</button>
+    </div>
+
+    <div class="drawer-body">
+      <!-- 板型切换 -->
+      <div class="section">
+        <div class="section-label">
+          <span>金属共振板型</span>
+          <span>6061 铝板 · 1.0mm</span>
+        </div>
+        <div class="segmented" role="tablist">
+          <button id="btnSquare" class="active" type="button">方形板 240mm</button>
+          <button id="btnCircle" type="button">圆形板 Ø240mm</button>
+        </div>
+      </div>
+
+      <!-- 精确频率与微调 -->
+      <div class="section">
+        <div class="section-label">
+          <span>精确频率控制</span>
+          <span>100 – 4000 Hz</span>
+        </div>
+
+        <div class="freq-card">
+          <div class="freq-top-row">
+            <div class="freq-input-wrap">
+              <input id="freqNumberInput" type="number" min="100" max="4000" step="1" value="660" aria-label="频率 Hz" />
+              <span class="freq-unit">Hz</span>
+            </div>
+            <span class="mode-badge" id="modeBadge">Mode (2,1)-</span>
+          </div>
+
+          <div class="resonance-row">
+            <div class="resonance-meta">
+              <span>共振耦合度</span>
+              <span class="resonance-status" id="resonanceStatus">强共振锁定 · 100%</span>
+            </div>
+            <div class="resonance-bar-bg">
+              <div class="resonance-bar-fill" id="resonanceBar"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="nudge-row">
+          <button class="btn btn-mono" type="button" data-nudge="-10">-10</button>
+          <button class="btn btn-mono" type="button" data-nudge="-1">-1</button>
+          <button class="btn btn-mono" type="button" data-nudge="1">+1</button>
+          <button class="btn btn-mono" type="button" data-nudge="10">+10</button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- 激振与音频 -->
+      <div class="section">
+        <div class="section-label">
+          <span>激振器与音频</span>
+        </div>
+        <div class="action-grid">
+          <button id="btnAudio" class="btn" type="button">🔇 开启声波发声</button>
+          <button id="btnSweep" class="btn" type="button">▶ 自动扫频</button>
+        </div>
+        <div class="action-grid">
+          <button id="btnScatter" class="btn" type="button">✦ 重新均匀撒沙</button>
+          <button id="btnSnap" class="btn" type="button">◎ 吸附最近共振</button>
+        </div>
+
+        <div class="param-row" style="margin-top: 4px;">
+          <span>激振强度</span>
+          <input id="ampSlider" type="range" min="0.25" max="1.6" step="0.05" value="1.0" />
+          <span class="val" id="ampVal">100%</span>
+        </div>
+        <div class="param-row">
+          <span>音频音量</span>
+          <input id="volSlider" type="range" min="0" max="0.35" step="0.01" value="0.10" />
+          <span class="val" id="volVal">29%</span>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- 经典共振频点 -->
+      <div class="section">
+        <div class="section-label">
+          <span>经典物理共振频点</span>
+          <span>点击平滑跳转</span>
+        </div>
+        <div class="presets-grid" id="presetsGrid"></div>
+      </div>
+
+      <div class="hint-box">
+        点击板面任意位置可局部补撒细沙。<br />
+        快捷键：<kbd>←</kbd><kbd>→</kbd> 微调 1 Hz，<kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 调 10 Hz，<kbd>Space</kbd> 开关发声，<kbd>Esc</kbd> 关闭侧边栏。
+      </div>
+    </div>
+  </aside>
+
+  <script>
+    (() => {
+      'use strict';
+
+      // ============================================================
+      // 1. 物理常量与本征模态表（校准至 240mm × 1.0mm 铝板，100–4000 Hz）
+      // ============================================================
+      const MIN_FREQ = 100;
+      const MAX_FREQ = 4000;
+      const FIELD_SIZE = 240;
+      const PARTICLE_COUNT = 32000;
+
+      const SQUARE_MODES = [
+        { m: 1, n: 0, sign:  1, f: 138,  q: 16, name: '单环菱框' },
+        { m: 1, n: 1, sign:  1, f: 276,  q: 18, name: '四叶花窗' },
+        { m: 2, n: 0, sign:  1, f: 548,  q: 20, name: '十字网格' },
+        { m: 2, n: 1, sign: -1, f: 660,  q: 22, name: '对称蝶翼' },
+        { m: 2, n: 1, sign:  1, f: 725,  q: 22, name: '星芒方环' },
+        { m: 2, n: 2, sign:  1, f: 1104, q: 25, name: '双重晶格' },
+        { m: 3, n: 0, sign:  1, f: 1242, q: 26, name: '九宫弦纹' },
+        { m: 3, n: 1, sign: -1, f: 1335, q: 26, name: '斜交花结' },
+        { m: 3, n: 1, sign:  1, f: 1438, q: 27, name: '八瓣方莲' },
+        { m: 3, n: 2, sign: -1, f: 1745, q: 28, name: '编织菱花' },
+        { m: 3, n: 2, sign:  1, f: 1865, q: 28, name: '繁复星阵' },
+        { m: 4, n: 0, sign:  1, f: 2195, q: 30, name: '高阶网格' },
+        { m: 4, n: 1, sign: -1, f: 2295, q: 30, name: '四象旋纹' },
+        { m: 4, n: 1, sign:  1, f: 2420, q: 30, name: '放射花毯' },
+        { m: 3, n: 3, sign:  1, f: 2505, q: 31, name: '对称蜂巢' },
+        { m: 4, n: 2, sign: -1, f: 2690, q: 32, name: '几何回纹' },
+        { m: 4, n: 2, sign:  1, f: 2840, q: 32, name: '精细万花' },
+        { m: 5, n: 0, sign:  1, f: 3120, q: 34, name: '密格波阵' },
+        { m: 4, n: 3, sign: -1, f: 3360, q: 35, name: '高阶蝶阵' },
+        { m: 4, n: 3, sign:  1, f: 3545, q: 35, name: '精细星宫' },
+        { m: 5, n: 2, sign: -1, f: 3880, q: 36, name: '超高频织锦' }
+      ];
+
+      const SQUARE_PRESETS = [
+        { f: 138,  label: '138 Hz',  desc: '单环菱框 · (1,0)+' },
+        { f: 276,  label: '276 Hz',  desc: '四叶花窗 · (1,1)+' },
+        { f: 660,  label: '660 Hz',  desc: '对称蝶翼 · (2,1)-' },
+        { f: 1104, label: '1104 Hz', desc: '双重晶格 · (2,2)+' },
+        { f: 1438, label: '1438 Hz', desc: '八瓣方莲 · (3,1)+' },
+        { f: 1865, label: '1865 Hz', desc: '繁复星阵 · (3,2)+' },
+        { f: 2840, label: '2840 Hz', desc: '精细万花 · (4,2)+' },
+        { f: 3545, label: '3545 Hz', desc: '精细星宫 · (4,3)+' }
+      ];
+
+      const CIRCLE_MODES = [
+        { n: 2, m: 1, k: 2.30,  f: 152,  q: 16, name: '十字双瓣' },
+        { n: 0, m: 1, k: 3.01,  f: 260,  q: 18, name: '经典单环' },
+        { n: 3, m: 1, k: 3.50,  f: 352,  q: 19, name: '六芒星瓣' },
+        { n: 4, m: 1, k: 4.65,  f: 620,  q: 22, name: '八瓣太阳花' },
+        { n: 1, m: 2, k: 4.53,  f: 588,  q: 21, name: '偏心双弧' },
+        { n: 2, m: 2, k: 5.94,  f: 1012, q: 25, name: '四象内环' },
+        { n: 0, m: 2, k: 6.20,  f: 1102, q: 25, name: '双同心圆' },
+        { n: 5, m: 1, k: 5.77,  f: 955,  q: 24, name: '十瓣菊纹' },
+        { n: 6, m: 1, k: 6.88,  f: 1358, q: 27, name: '十二放射轮' },
+        { n: 3, m: 2, k: 7.28,  f: 1520, q: 28, name: '六瓣双环' },
+        { n: 4, m: 2, k: 8.58,  f: 2110, q: 30, name: '八瓣重莲' },
+        { n: 0, m: 3, k: 9.37,  f: 2518, q: 31, name: '三重同心圆' },
+        { n: 5, m: 2, k: 9.84,  f: 2775, q: 32, name: '十瓣双轮' },
+        { n: 7, m: 1, k: 7.98,  f: 1825, q: 29, name: '十四星轮' },
+        { n: 3, m: 3, k: 10.61, f: 3228, q: 34, name: '六瓣三环' },
+        { n: 6, m: 2, k: 11.08, f: 3520, q: 35, name: '十二瓣重环' },
+        { n: 4, m: 3, k: 11.78, f: 3975, q: 36, name: '八瓣三环' }
+      ];
+
+      const CIRCLE_PRESETS = [
+        { f: 152,  label: '152 Hz',  desc: '十字双瓣 · (n=2,m=1)' },
+        { f: 260,  label: '260 Hz',  desc: '经典单环 · (n=0,m=1)' },
+        { f: 352,  label: '352 Hz',  desc: '六芒星瓣 · (n=3,m=1)' },
+        { f: 620,  label: '620 Hz',  desc: '八瓣太阳花 · (n=4,m=1)' },
+        { f: 1102, label: '1102 Hz', desc: '双同心圆 · (n=0,m=2)' },
+        { f: 1520, label: '1520 Hz', desc: '六瓣双环 · (n=3,m=2)' },
+        { f: 2518, label: '2518 Hz', desc: '三重同心圆 · (n=0,m=3)' },
+        { f: 3520, label: '3520 Hz', desc: '十二瓣重环 · (n=6,m=2)' }
+      ];
+
+      // ============================================================
+      // 2. 第一类贝塞尔函数与模态预计算
+      // ============================================================
+      const FACTORIALS = [1];
+      for (let i = 1; i <= 32; i++) FACTORIALS[i] = FACTORIALS[i - 1] * i;
+
+      function besselJ(n, x) {
+        if (x === 0) return n === 0 ? 1 : 0;
+        const halfX = x * 0.5;
+        const halfX2 = halfX * halfX;
+        let term = Math.pow(halfX, n) / FACTORIALS[n];
+        let sum = term;
+        for (let k = 1; k <= 26; k++) {
+          term = (-term * halfX2) / (k * (k + n));
+          sum += term;
+          if (Math.abs(term) < 1e-10) break;
+        }
+        return sum;
+      }
+
+      function buildSquareModeGrids() {
+        const grids = [];
+        const N = FIELD_SIZE;
+        for (const mode of SQUARE_MODES) {
+          const grid = new Float32Array(N * N);
+          let maxAbs = 0;
+          const mPi = mode.m * Math.PI;
+          const nPi = mode.n * Math.PI;
+          const s = mode.sign;
+          for (let j = 0; j < N; j++) {
+            const v = (j / (N - 1)) * 2 - 1;
+            const cmv = Math.cos(mPi * v);
+            const cnv = Math.cos(nPi * v);
+            const rowOffset = j * N;
+            for (let i = 0; i < N; i++) {
+              const u = (i / (N - 1)) * 2 - 1;
+              const val = Math.cos(mPi * u) * cnv + s * Math.cos(nPi * u) * cmv;
+              grid[rowOffset + i] = val;
+              const a = Math.abs(val);
+              if (a > maxAbs) maxAbs = a;
+            }
+          }
+          if (maxAbs > 0) {
+            for (let k = 0; k < grid.length; k++) grid[k] /= maxAbs;
+          }
+          grids.push(grid);
+        }
+        return grids;
+      }
+
+      function buildCircleModeGrids() {
+        const grids = [];
+        const N = FIELD_SIZE;
+        const rArr = new Float32Array(N * N);
+        const tArr = new Float32Array(N * N);
+        for (let j = 0; j < N; j++) {
+          const v = (j / (N - 1)) * 2 - 1;
+          for (let i = 0; i < N; i++) {
+            const u = (i / (N - 1)) * 2 - 1;
+            const idx = j * N + i;
+            rArr[idx] = Math.hypot(u, v);
+            tArr[idx] = Math.atan2(v, u);
+          }
+        }
+
+        for (const mode of CIRCLE_MODES) {
+          const grid = new Float32Array(N * N);
+          let maxAbs = 0;
+          const { n, k } = mode;
+          for (let idx = 0; idx < N * N; idx++) {
+            const r = rArr[idx];
+            if (r > 1.02) {
+              grid[idx] = 0;
+              continue;
+            }
+            const val = besselJ(n, k * r) * (n === 0 ? 1 : Math.cos(n * tArr[idx]));
+            grid[idx] = val;
+            const a = Math.abs(val);
+            if (a > maxAbs) maxAbs = a;
+          }
+          if (maxAbs > 0) {
+            for (let idx = 0; idx < grid.length; idx++) grid[idx] /= maxAbs;
+          }
+          grids.push(grid);
+        }
+        return grids;
+      }
+
+      const squareModeGrids = buildSquareModeGrids();
+      const circleModeGrids = buildCircleModeGrids();
+
+      // ============================================================
+      // 3. 状态与高 Q 值物理振场合成
+      // ============================================================
+      const state = {
+        shape: 'square',
+        freq: 660,
+        targetFreq: null,
+        amplitude: 1.0,
+        volume: 0.10,
+        audioOn: false,
+        sweeping: false,
+        resonanceLevel: 1.0,
+        dominantLabel: 'Mode (2,1)-',
+        drawerOpen: false
+      };
+
+      const ampField = new Float32Array(FIELD_SIZE * FIELD_SIZE);
+      const gradX = new Float32Array(FIELD_SIZE * FIELD_SIZE);
+      const gradY = new Float32Array(FIELD_SIZE * FIELD_SIZE);
+
+      function recomputeWaveField() {
+        const modes = state.shape === 'square' ? SQUARE_MODES : CIRCLE_MODES;
+        const grids = state.shape === 'square' ? squareModeGrids : circleModeGrids;
+        const f = state.freq;
+        const len = FIELD_SIZE * FIELD_SIZE;
+
+        const weights = new Float32Array(modes.length);
+        let bestWeight = 0;
+        let bestIdx = 0;
+
+        for (let mIdx = 0; mIdx < modes.length; mIdx++) {
+          const mode = modes[mIdx];
+          const gamma = mode.f / (mode.q * 1.55);
+          const df = f - mode.f;
+          const w = 1 / (1 + (df / gamma) ** 2);
+          weights[mIdx] = w;
+          if (w > bestWeight) {
+            bestWeight = w;
+            bestIdx = mIdx;
+          }
+        }
+
+        const bestMode = modes[bestIdx];
+        const rawField = new Float32Array(len);
+
+        for (let mIdx = 0; mIdx < modes.length; mIdx++) {
+          let weight = weights[mIdx];
+          if (mIdx !== bestIdx && bestWeight > 0.72) {
+            const suppress = Math.max(0.02, 1 - (bestWeight - 0.72) / 0.28);
+            weight *= suppress * suppress;
+          }
+          if (weight < 0.018) continue;
+
+          const df = f - modes[mIdx].f;
+          const phaseSign = df >= 0 ? 1 : -1;
+          const wSigned = weight * phaseSign;
+          const grid = grids[mIdx];
+          for (let i = 0; i < len; i++) {
+            rawField[i] += grid[i] * wSigned;
+          }
+        }
+
+        let maxVal = 0;
+        for (let i = 0; i < len; i++) {
+          const a = Math.abs(rawField[i]);
+          if (a > maxVal) maxVal = a;
+        }
+        const invMax = maxVal > 1e-5 ? 1 / maxVal : 1;
+
+        const lockFactor = Math.min(1, Math.pow(bestWeight, 1.15));
+        state.resonanceLevel = lockFactor;
+        const baseFloor = (1 - lockFactor) * 0.24;
+        const gammaShape = state.shape === 'circle' ? 0.76 : 0.92;
+
+        for (let i = 0; i < len; i++) {
+          const normalized = Math.pow(Math.abs(rawField[i]) * invMax, gammaShape);
+          ampField[i] = Math.min(1, normalized * (0.45 + 0.55 * lockFactor) + baseFloor);
+        }
+
+        const N = FIELD_SIZE;
+        for (let j = 1; j < N - 1; j++) {
+          const row = j * N;
+          for (let i = 1; i < N - 1; i++) {
+            const idx = row + i;
+            gradX[idx] = (ampField[idx + 1] - ampField[idx - 1]) * 0.5;
+            gradY[idx] = (ampField[idx + N] - ampField[idx - N]) * 0.5;
+          }
+        }
+
+        if (state.shape === 'square') {
+          const s = bestMode.sign > 0 ? '+' : '-';
+          state.dominantLabel = bestWeight > 0.42
+            ? `Mode (${bestMode.m},${bestMode.n})${s}`
+            : `过渡叠加态`;
+        } else {
+          state.dominantLabel = bestWeight > 0.42
+            ? `Bessel (${bestMode.n},${bestMode.m})`
+            : `过渡叠加态`;
+        }
+
+        updateResonanceUI();
+      }
+
+      // ============================================================
+      // 4. 32,000 颗石英细砂物理演化
+      // ============================================================
+      const px = new Float32Array(PARTICLE_COUNT);
+      const py = new Float32Array(PARTICLE_COUNT);
+      const pShade = new Float32Array(PARTICLE_COUNT);
+
+      function scatterParticles() {
+        const isCircle = state.shape === 'circle';
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          if (isCircle) {
+            const r = Math.sqrt(Math.random() * (0.975 * 0.975 - 0.05 * 0.05) + 0.05 * 0.05);
+            const theta = Math.random() * Math.PI * 2;
+            px[i] = r * Math.cos(theta);
+            py[i] = r * Math.sin(theta);
+          } else {
+            let x, y;
+            do {
+              x = (Math.random() * 2 - 1) * 0.985;
+              y = (Math.random() * 2 - 1) * 0.985;
+            } while (x * x + y * y < 0.05 * 0.05);
+            px[i] = x;
+            py[i] = y;
+          }
+          pShade[i] = 0.78 + Math.random() * 0.22;
+        }
+      }
+
+      function sprinkleAt(normX, normY) {
+        const count = 1800;
+        const start = Math.floor(Math.random() * (PARTICLE_COUNT - count));
+        const isCircle = state.shape === 'circle';
+        for (let k = 0; k < count; k++) {
+          const i = start + k;
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.sqrt(Math.random()) * 0.18;
+          let x = normX + Math.cos(angle) * dist;
+          let y = normY + Math.sin(angle) * dist;
+          if (isCircle) {
+            const r = Math.hypot(x, y);
+            if (r > 0.97) {
+              x = (x / r) * 0.96;
+              y = (y / r) * 0.96;
+            }
+          } else {
+            x = Math.max(-0.98, Math.min(0.98, x));
+            y = Math.max(-0.98, Math.min(0.98, y));
+          }
+          px[i] = x;
+          py[i] = y;
+        }
+      }
+
+      function stepParticles() {
+        const N = FIELD_SIZE;
+        const nMinus1 = N - 1;
+        const isCircle = state.shape === 'circle';
+        const energy = state.amplitude;
+        const freqScale = 0.85 + 0.35 * (1 - Math.log(state.freq / MIN_FREQ) / Math.log(MAX_FREQ / MIN_FREQ));
+        const maxJump = 0.024 * energy * freqScale;
+        const driftGain = 0.042 * energy;
+        const centerBoltR2 = 0.046 * 0.046;
+
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          let x = px[i];
+          let y = py[i];
+
+          const gx = Math.max(0, Math.min(nMinus1, ((x + 1) * 0.5 * nMinus1) | 0));
+          const gy = Math.max(0, Math.min(nMinus1, ((y + 1) * 0.5 * nMinus1) | 0));
+          const idx = gy * N + gx;
+
+          const a = ampField[idx];
+          const stochastic = (a * a * 0.85 + a * 0.15) * maxJump + 0.00025 * energy;
+
+          x += (Math.random() - 0.5) * 2 * stochastic - gradX[idx] * driftGain * a;
+          y += (Math.random() - 0.5) * 2 * stochastic - gradY[idx] * driftGain * a;
+
+          const r2 = x * x + y * y;
+          if (r2 < centerBoltR2 && r2 > 1e-8) {
+            const invR = 0.047 / Math.sqrt(r2);
+            x *= invR;
+            y *= invR;
+          }
+
+          if (isCircle) {
+            if (r2 > 0.975 * 0.975) {
+              const r = Math.sqrt(r2);
+              const clampR = 0.972 - Math.random() * 0.015;
+              x = (x / r) * clampR;
+              y = (y / r) * clampR;
+            }
+          } else {
+            if (x > 0.985) x = 0.982 - Math.random() * 0.012;
+            else if (x < -0.985) x = -0.982 + Math.random() * 0.012;
+            if (y > 0.985) y = 0.982 - Math.random() * 0.012;
+            else if (y < -0.985) y = -0.982 + Math.random() * 0.012;
+          }
+
+          px[i] = x;
+          py[i] = y;
+        }
+      }
+
+      // ============================================================
+      // 5. 写实铝板与细沙渲染
+      // ============================================================
+      const canvas = document.getElementById('plateCanvas');
+      const ctx = canvas.getContext('2d');
+      const W = canvas.width;
+      const H = canvas.height;
+      const PLATE_MARGIN = 18;
+      const PLATE_SPAN = W - PLATE_MARGIN * 2;
+      const HALF_SPAN = PLATE_SPAN * 0.5;
+      const CENTER = W * 0.5;
+
+      const bgCanvas = document.createElement('canvas');
+      bgCanvas.width = W;
+      bgCanvas.height = H;
+      const bgCtx = bgCanvas.getContext('2d');
+
+      const sandCanvas = document.createElement('canvas');
+      sandCanvas.width = W;
+      sandCanvas.height = H;
+      const sandCtx = sandCanvas.getContext('2d');
+      const sandImageData = sandCtx.createImageData(W, H);
+      const sandBuffer32 = new Uint32Array(sandImageData.data.buffer);
+      const densityMap = new Uint16Array(W * H);
+
+      function renderPlateBackground() {
+        bgCtx.clearRect(0, 0, W, H);
+        bgCtx.save();
+
+        const isCircle = state.shape === 'circle';
+        bgCtx.beginPath();
+        if (isCircle) {
+          bgCtx.arc(CENTER, CENTER, HALF_SPAN, 0, Math.PI * 2);
+        } else {
+          bgCtx.roundRect(PLATE_MARGIN, PLATE_MARGIN, PLATE_SPAN, PLATE_SPAN, 14);
+        }
+        bgCtx.closePath();
+        bgCtx.clip();
+
+        // 柔和的暗室金属微光，边缘自然融向背景透明
+        const grad = bgCtx.createRadialGradient(
+          CENTER - HALF_SPAN * 0.16, CENTER - HALF_SPAN * 0.18, HALF_SPAN * 0.05,
+          CENTER, CENTER, HALF_SPAN * 1.15
+        );
+        grad.addColorStop(0, 'rgba(34, 37, 44, 0.72)');
+        grad.addColorStop(0.58, 'rgba(20, 22, 27, 0.45)');
+        grad.addColorStop(0.88, 'rgba(13, 14, 18, 0.14)');
+        grad.addColorStop(1, 'rgba(10, 11, 14, 0)');
+        bgCtx.fillStyle = grad;
+        bgCtx.fillRect(PLATE_MARGIN, PLATE_MARGIN, PLATE_SPAN, PLATE_SPAN);
+
+        // 极细腻的金属拉丝与磨砂颗粒（克制透明度，不喧宾夺主）
+        bgCtx.strokeStyle = 'rgba(255, 255, 255, 0.011)';
+        bgCtx.lineWidth = 1;
+        for (let y = PLATE_MARGIN; y < W - PLATE_MARGIN; y += 3) {
+          bgCtx.beginPath();
+          bgCtx.moveTo(PLATE_MARGIN, y);
+          bgCtx.lineTo(W - PLATE_MARGIN, y);
+          bgCtx.stroke();
+        }
+
+        for (let i = 0; i < 3600; i++) {
+          const rx = PLATE_MARGIN + Math.random() * PLATE_SPAN;
+          const ry = PLATE_MARGIN + Math.random() * PLATE_SPAN;
+          const alpha = Math.random() * 0.02;
+          bgCtx.fillStyle = Math.random() > 0.5
+            ? `rgba(255,255,255,${alpha})`
+            : `rgba(0,0,0,${alpha * 1.3})`;
+          bgCtx.fillRect(rx, ry, 1.5, 1.5);
+        }
+
+        // 用 destination-out 将底板边缘做柔和透明羽化，消除生硬方框/圆框感
+        bgCtx.globalCompositeOperation = 'destination-out';
+        if (isCircle) {
+          const maskGrad = bgCtx.createRadialGradient(
+            CENTER, CENTER, HALF_SPAN * 0.68,
+            CENTER, CENTER, HALF_SPAN
+          );
+          maskGrad.addColorStop(0, 'rgba(0,0,0,0)');
+          maskGrad.addColorStop(0.65, 'rgba(0,0,0,0.45)');
+          maskGrad.addColorStop(1, 'rgba(0,0,0,1)');
+          bgCtx.fillStyle = maskGrad;
+          bgCtx.fillRect(0, 0, W, H);
+        } else {
+          // 方形四边平滑羽化透明（仅擦除边缘，不影响中心区域）
+          const feather = 86;
+          const x0 = PLATE_MARGIN;
+          const x1 = W - PLATE_MARGIN;
+          const y0 = PLATE_MARGIN;
+          const y1 = H - PLATE_MARGIN;
+
+          const topMask = bgCtx.createLinearGradient(0, y0, 0, y0 + feather);
+          topMask.addColorStop(0, 'rgba(0,0,0,1)');
+          topMask.addColorStop(1, 'rgba(0,0,0,0)');
+          bgCtx.fillStyle = topMask;
+          bgCtx.fillRect(0, y0, W, feather);
+
+          const botMask = bgCtx.createLinearGradient(0, y1, 0, y1 - feather);
+          botMask.addColorStop(0, 'rgba(0,0,0,1)');
+          botMask.addColorStop(1, 'rgba(0,0,0,0)');
+          bgCtx.fillStyle = botMask;
+          bgCtx.fillRect(0, y1 - feather, W, feather);
+
+          const leftMask = bgCtx.createLinearGradient(x0, 0, x0 + feather, 0);
+          leftMask.addColorStop(0, 'rgba(0,0,0,1)');
+          leftMask.addColorStop(1, 'rgba(0,0,0,0)');
+          bgCtx.fillStyle = leftMask;
+          bgCtx.fillRect(x0, 0, feather, H);
+
+          const rightMask = bgCtx.createLinearGradient(x1, 0, x1 - feather, 0);
+          rightMask.addColorStop(0, 'rgba(0,0,0,1)');
+          rightMask.addColorStop(1, 'rgba(0,0,0,0)');
+          bgCtx.fillStyle = rightMask;
+          bgCtx.fillRect(x1 - feather, 0, feather, H);
+        }
+
+        bgCtx.restore();
+      }
+
+      function drawCenterBolt() {
+        ctx.save();
+        ctx.translate(CENTER, CENTER);
+
+        ctx.beginPath();
+        ctx.arc(0, 2, 16, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.fill();
+
+        const washerGrad = ctx.createLinearGradient(-15, -15, 15, 15);
+        washerGrad.addColorStop(0, '#6a707c');
+        washerGrad.addColorStop(0.5, '#3b4049');
+        washerGrad.addColorStop(1, '#1d2026');
+        ctx.beginPath();
+        ctx.arc(0, 0, 14.5, 0, Math.PI * 2);
+        ctx.fillStyle = washerGrad;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        const capGrad = ctx.createRadialGradient(-3, -3, 1, 0, 0, 10);
+        capGrad.addColorStop(0, '#cfd5de');
+        capGrad.addColorStop(0.55, '#7e8694');
+        capGrad.addColorStop(1, '#393e47');
+        ctx.beginPath();
+        ctx.arc(0, 0, 9.5, 0, Math.PI * 2);
+        ctx.fillStyle = capGrad;
+        ctx.fill();
+
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI / 3) * i - Math.PI / 6;
+          const hx = Math.cos(a) * 4.5;
+          const hy = Math.sin(a) * 4.5;
+          if (i === 0) ctx.moveTo(hx, hy);
+          else ctx.lineTo(hx, hy);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#14161a';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+        ctx.lineWidth = 0.7;
+        ctx.stroke();
+
+        ctx.restore();
+      }
+
+      function renderSandFrame() {
+        densityMap.fill(0);
+        sandBuffer32.fill(0);
+
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          const sx = (CENTER + px[i] * HALF_SPAN) | 0;
+          const sy = (CENTER + py[i] * HALF_SPAN) | 0;
+          if (sx < 1 || sx >= W - 1 || sy < 1 || sy >= H - 1) continue;
+
+          const idx = sy * W + sx;
+          const d = densityMap[idx] + 1;
+          densityMap[idx] = d;
+
+          const boost = d === 1 ? 0.62 : (d === 2 ? 0.84 : (d === 3 ? 0.94 : 1.0));
+          const shade = pShade[i] * boost;
+
+          const r = Math.min(255, (245 * shade) | 0);
+          const g = Math.min(255, (238 * shade) | 0);
+          const b = Math.min(255, (225 * shade) | 0);
+          const a = d === 1 ? 185 : (d === 2 ? 230 : 255);
+
+          sandBuffer32[idx] = (a << 24) | (b << 16) | (g << 8) | r;
+
+          if (d >= 3) {
+            const rightIdx = idx + 1;
+            if (densityMap[rightIdx] === 0) {
+              sandBuffer32[rightIdx] = (110 << 24) | ((b * 0.85) << 16) | ((g * 0.85) << 8) | ((r * 0.85) | 0);
+            }
+          }
+        }
+
+        sandCtx.putImageData(sandImageData, 0, 0);
+
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(bgCanvas, 0, 0);
+        ctx.drawImage(sandCanvas, 0, 0);
+        drawCenterBolt();
+      }
+
+      // ============================================================
+      // 6. Web Audio API 实时正弦波声源
+      // ============================================================
+      let audioCtx = null;
+      let osc = null;
+      let gainNode = null;
+
+      function initAudioIfNeeded() {
+        if (audioCtx) return;
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContextClass();
+        osc = audioCtx.createOscillator();
+        gainNode = audioCtx.createGain();
+
+        osc.type = 'sine';
+        osc.frequency.value = state.freq;
+        gainNode.gain.value = 0.0001;
+
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        osc.start();
+      }
+
+      function syncAudio() {
+        if (!audioCtx || !osc || !gainNode) return;
+        const now = audioCtx.currentTime;
+        osc.frequency.setTargetAtTime(state.freq, now, 0.025);
+        const highFreqAtten = state.freq > 1200
+          ? 1 / (1 + (state.freq - 1200) / 1800)
+          : 1.0;
+        const targetGain = state.audioOn ? Math.max(0.0001, state.volume * highFreqAtten) : 0.0001;
+        gainNode.gain.setTargetAtTime(targetGain, now, 0.04);
+      }
+
+      function toggleAudio() {
+        initAudioIfNeeded();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        state.audioOn = !state.audioOn;
+        syncAudio();
+        btnAudio.classList.toggle('btn-active', state.audioOn);
+        btnAudio.textContent = state.audioOn ? '🔊 声波发声中' : '🔇 开启声波发声';
+      }
+
+      // ============================================================
+      // 7. 极简 HUD 浮现控制 + 侧边抽屉交互
+      // ============================================================
+      const tunerDock = document.getElementById('tunerDock');
+      const hudHz = document.getElementById('hudHz');
+      const hudMode = document.getElementById('hudMode');
+      const hudDot = document.getElementById('hudDot');
+      const hudResText = document.getElementById('hudResText');
+      const sliderProgress = document.getElementById('sliderProgress');
+      const freqSlider = document.getElementById('freqSlider');
+
+      const settingsBtn = document.getElementById('settingsBtn');
+      const drawerBackdrop = document.getElementById('drawerBackdrop');
+      const settingsDrawer = document.getElementById('settingsDrawer');
+      const drawerCloseBtn = document.getElementById('drawerCloseBtn');
+
+      const freqNumberInput = document.getElementById('freqNumberInput');
+      const modeBadge = document.getElementById('modeBadge');
+      const resonanceStatus = document.getElementById('resonanceStatus');
+      const resonanceBar = document.getElementById('resonanceBar');
+      const btnSquare = document.getElementById('btnSquare');
+      const btnCircle = document.getElementById('btnCircle');
+      const btnAudio = document.getElementById('btnAudio');
+      const btnSweep = document.getElementById('btnSweep');
+      const btnScatter = document.getElementById('btnScatter');
+      const btnSnap = document.getElementById('btnSnap');
+      const ampSlider = document.getElementById('ampSlider');
+      const ampVal = document.getElementById('ampVal');
+      const volSlider = document.getElementById('volSlider');
+      const volVal = document.getElementById('volVal');
+      const presetsGrid = document.getElementById('presetsGrid');
+
+      // 按需显示滑块上方 HUD：仅在拖动滑块 / 调频 / 扫频时显示，静止 1.3s 后自动隐藏
+      let hudHideTimer = null;
+      let isDraggingSlider = false;
+
+      function showHudTemporarily(durationMs = 1300) {
+        tunerDock.classList.add('active');
+        clearTimeout(hudHideTimer);
+        if (!isDraggingSlider && !state.sweeping) {
+          hudHideTimer = setTimeout(() => {
+            if (!isDraggingSlider && !state.sweeping) {
+              tunerDock.classList.remove('active');
+            }
+          }, durationMs);
+        }
+      }
+
+      function setDrawerOpen(open) {
+        state.drawerOpen = open;
+        settingsDrawer.classList.toggle('open', open);
+        drawerBackdrop.classList.toggle('open', open);
+        settingsBtn.setAttribute('aria-expanded', String(open));
+        settingsDrawer.setAttribute('aria-hidden', String(!open));
+      }
+
+      settingsBtn.addEventListener('click', () => setDrawerOpen(!state.drawerOpen));
+      drawerCloseBtn.addEventListener('click', () => setDrawerOpen(false));
+      drawerBackdrop.addEventListener('click', () => setDrawerOpen(false));
+
+      const LOG_MIN = Math.log(MIN_FREQ);
+      const LOG_MAX = Math.log(MAX_FREQ);
+
+      function sliderToFreq(val) {
+        const t = val / 1000;
+        return Math.round(Math.exp(LOG_MIN + t * (LOG_MAX - LOG_MIN)));
+      }
+
+      function freqToSlider(freq) {
+        const clamped = Math.max(MIN_FREQ, Math.min(MAX_FREQ, freq));
+        return Math.round(((Math.log(clamped) - LOG_MIN) / (LOG_MAX - LOG_MIN)) * 1000);
+      }
+
+      function syncSliderProgress(sliderVal) {
+        sliderProgress.style.width = `${(sliderVal / 1000) * 100}%`;
+      }
+
+      function setFrequency(newFreq, fromSlider = false, revealHud = true) {
+        const clamped = Math.max(MIN_FREQ, Math.min(MAX_FREQ, Math.round(newFreq)));
+        state.freq = clamped;
+        freqNumberInput.value = clamped;
+        hudHz.textContent = `${clamped} Hz`;
+
+        if (!fromSlider) {
+          const sv = freqToSlider(clamped);
+          freqSlider.value = sv;
+          syncSliderProgress(sv);
+        } else {
+          syncSliderProgress(Number(freqSlider.value));
+        }
+
+        recomputeWaveField();
+        syncAudio();
+        highlightActivePreset();
+        if (revealHud) showHudTemporarily();
+      }
+
+      function updateResonanceUI() {
+        const pct = Math.round(state.resonanceLevel * 100);
+        resonanceBar.style.width = `${pct}%`;
+        modeBadge.textContent = state.dominantLabel;
+        hudMode.textContent = state.dominantLabel;
+
+        hudDot.classList.remove('locked', 'mid');
+        if (pct >= 78) {
+          resonanceStatus.textContent = `强共振锁定 · ${pct}%`;
+          resonanceStatus.classList.add('locked');
+          hudDot.classList.add('locked');
+          hudResText.textContent = `强共振 ${pct}%`;
+        } else if (pct >= 45) {
+          resonanceStatus.textContent = `部分共振 · ${pct}%`;
+          resonanceStatus.classList.remove('locked');
+          hudDot.classList.add('mid');
+          hudResText.textContent = `共振 ${pct}%`;
+        } else {
+          resonanceStatus.textContent = `非共振过渡态 · ${pct}%`;
+          resonanceStatus.classList.remove('locked');
+          hudResText.textContent = `过渡态`;
+        }
+      }
+
+      function renderPresets() {
+        const list = state.shape === 'square' ? SQUARE_PRESETS : CIRCLE_PRESETS;
+        presetsGrid.innerHTML = '';
+        for (const item of list) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'preset-btn';
+          btn.dataset.freq = item.f;
+          btn.innerHTML = `
+            <span class="preset-hz">${item.label}</span>
+            <span class="preset-desc">${item.desc}</span>
+          `;
+          btn.addEventListener('click', () => {
+            state.sweeping = false;
+            btnSweep.classList.remove('btn-active');
+            btnSweep.textContent = '▶ 自动扫频';
+            state.targetFreq = item.f;
+            showHudTemporarily(1800);
+          });
+          presetsGrid.appendChild(btn);
+        }
+        highlightActivePreset();
+      }
+
+      function highlightActivePreset() {
+        const buttons = presetsGrid.querySelectorAll('.preset-btn');
+        buttons.forEach((btn) => {
+          const f = Number(btn.dataset.freq);
+          btn.classList.toggle('current', Math.abs(f - state.freq) <= 8);
+        });
+      }
+
+      function switchShape(shape) {
+        if (state.shape === shape) return;
+        state.shape = shape;
+        btnSquare.classList.toggle('active', shape === 'square');
+        btnCircle.classList.toggle('active', shape === 'circle');
+
+        const defaultF = shape === 'square' ? 660 : 620;
+        state.targetFreq = null;
+        renderPlateBackground();
+        renderPresets();
+        scatterParticles();
+        setFrequency(defaultF, false, true);
+      }
+
+      // 滑块事件：仅滑动时持续显示 HUD，松手后自动淡出
+      freqSlider.addEventListener('pointerdown', () => {
+        isDraggingSlider = true;
+        clearTimeout(hudHideTimer);
+        tunerDock.classList.add('active');
+      });
+
+      const endSliderDrag = () => {
+        if (!isDraggingSlider) return;
+        isDraggingSlider = false;
+        showHudTemporarily(1200);
+      };
+      window.addEventListener('pointerup', endSliderDrag);
+      window.addEventListener('pointercancel', endSliderDrag);
+
+      freqSlider.addEventListener('input', (e) => {
+        state.targetFreq = null;
+        state.sweeping = false;
+        btnSweep.classList.remove('btn-active');
+        btnSweep.textContent = '▶ 自动扫频';
+        setFrequency(sliderToFreq(Number(e.target.value)), true, true);
+      });
+
+      freqNumberInput.addEventListener('change', (e) => {
+        state.targetFreq = null;
+        const val = Number(e.target.value);
+        if (!Number.isNaN(val)) setFrequency(val, false, true);
+      });
+
+      document.querySelectorAll('[data-nudge]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.targetFreq = null;
+          setFrequency(state.freq + Number(btn.dataset.nudge), false, true);
+        });
+      });
+
+      btnSquare.addEventListener('click', () => switchShape('square'));
+      btnCircle.addEventListener('click', () => switchShape('circle'));
+      btnAudio.addEventListener('click', toggleAudio);
+
+      btnSweep.addEventListener('click', () => {
+        state.sweeping = !state.sweeping;
+        state.targetFreq = null;
+        btnSweep.classList.toggle('btn-active', state.sweeping);
+        btnSweep.textContent = state.sweeping ? '⏸ 暂停扫频' : '▶ 自动扫频';
+        if (state.sweeping) {
+          clearTimeout(hudHideTimer);
+          tunerDock.classList.add('active');
+        } else {
+          showHudTemporarily(1200);
+        }
+      });
+
+      btnScatter.addEventListener('click', scatterParticles);
+
+      btnSnap.addEventListener('click', () => {
+        const modes = state.shape === 'square' ? SQUARE_MODES : CIRCLE_MODES;
+        let nearest = modes[0];
+        let minDiff = Infinity;
+        for (const m of modes) {
+          const d = Math.abs(m.f - state.freq);
+          if (d < minDiff) {
+            minDiff = d;
+            nearest = m;
+          }
+        }
+        state.sweeping = false;
+        btnSweep.classList.remove('btn-active');
+        btnSweep.textContent = '▶ 自动扫频';
+        state.targetFreq = nearest.f;
+        showHudTemporarily(1600);
+      });
+
+      ampSlider.addEventListener('input', (e) => {
+        state.amplitude = Number(e.target.value);
+        ampVal.textContent = `${Math.round(state.amplitude * 100)}%`;
+      });
+
+      volSlider.addEventListener('input', (e) => {
+        state.volume = Number(e.target.value);
+        volVal.textContent = `${Math.round((state.volume / 0.35) * 100)}%`;
+        syncAudio();
+      });
+
+      canvas.addEventListener('pointerdown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const cx = ((e.clientX - rect.left) / rect.width) * W;
+        const cy = ((e.clientY - rect.top) / rect.height) * H;
+        const nx = (cx - CENTER) / HALF_SPAN;
+        const ny = (cy - CENTER) / HALF_SPAN;
+        if (state.shape === 'circle' && nx * nx + ny * ny > 1) return;
+        if (Math.abs(nx) > 1 || Math.abs(ny) > 1) return;
+        sprinkleAt(nx, ny);
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && state.drawerOpen) {
+          setDrawerOpen(false);
+          return;
+        }
+        if (document.activeElement === freqNumberInput) return;
+        if (e.code === 'Space') {
+          e.preventDefault();
+          toggleAudio();
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          state.targetFreq = null;
+          setFrequency(state.freq + (e.shiftKey ? 10 : 1), false, true);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          state.targetFreq = null;
+          setFrequency(state.freq - (e.shiftKey ? 10 : 1), false, true);
+        }
+      });
+
+      // ============================================================
+      // 8. 主循环
+      // ============================================================
+      let lastTime = performance.now();
+
+      function loop(now) {
+        const dt = Math.min(0.05, (now - lastTime) / 1000);
+        lastTime = now;
+
+        if (state.targetFreq !== null) {
+          const diff = state.targetFreq - state.freq;
+          if (Math.abs(diff) <= 1.2) {
+            setFrequency(state.targetFreq, false, true);
+            state.targetFreq = null;
+          } else {
+            const step = Math.sign(diff) * Math.max(1, Math.abs(diff) * 0.14);
+            setFrequency(state.freq + step, false, true);
+          }
+        } else if (state.sweeping) {
+          const slowdown = 1 - state.resonanceLevel * 0.55;
+          const nextFreq = state.freq * (1 + 0.085 * slowdown * dt);
+          if (nextFreq >= MAX_FREQ) {
+            setFrequency(MIN_FREQ, false, true);
+          } else {
+            const delta = Math.max(1, Math.round(nextFreq) - state.freq);
+            if (Math.random() < (nextFreq - state.freq) || nextFreq - state.freq >= 1) {
+              setFrequency(state.freq + delta, false, true);
+            }
+          }
+        }
+
+        stepParticles();
+        stepParticles();
+        renderSandFrame();
+
+        requestAnimationFrame(loop);
+      }
+
+      // 初始化（默认静止态隐藏 HUD，让主画面绝对纯净）
+      renderPlateBackground();
+      renderPresets();
+      scatterParticles();
+      const initSliderVal = freqToSlider(state.freq);
+      freqSlider.value = initSliderVal;
+      syncSliderProgress(initSliderVal);
+      hudHz.textContent = `${state.freq} Hz`;
+      recomputeWaveField();
+      requestAnimationFrame(loop);
+    })();
+  </script>
+</body>
+</html>
