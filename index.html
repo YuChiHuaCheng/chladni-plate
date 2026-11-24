@@ -147,7 +147,7 @@
       -webkit-user-select: none;
     }
 
-    /* 底部极简贴合背景的悬浮滑动条容器 */
+    /* 底部极简贴合背景的悬浮控制条容器（手动滑块 / 音乐进度条共用） */
     .tuner-dock {
       position: fixed;
       bottom: 22px;
@@ -161,6 +161,183 @@
       align-items: center;
       user-select: none;
       -webkit-user-select: none;
+    }
+
+    /* 音乐模式下的底部极简播控条 */
+    .music-bar {
+      display: none;
+      width: 100%;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .tuner-dock.music-mode .slider-track-wrap {
+      display: none;
+    }
+
+    .tuner-dock.music-mode .music-bar {
+      display: flex;
+    }
+
+    .music-mini-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(20, 22, 27, 0.58);
+      color: rgba(238, 240, 244, 0.8);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.18s ease;
+    }
+
+    .music-mini-btn:hover {
+      border-color: rgba(230, 184, 115, 0.5);
+      color: var(--accent);
+      background: rgba(230, 184, 115, 0.12);
+    }
+
+    .music-mini-btn svg {
+      width: 13px;
+      height: 13px;
+      stroke: currentColor;
+      fill: currentColor;
+      stroke-width: 1.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .music-progress-wrap {
+      position: relative;
+      flex: 1;
+      height: 28px;
+      display: flex;
+      align-items: center;
+    }
+
+    input[type="range"]#musicSeekSlider {
+      -webkit-appearance: none;
+      appearance: none;
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 28px;
+      background: transparent;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]#musicSeekSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #cfd5de;
+      border: 2px solid #0e1014;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18), 0 2px 8px rgba(0, 0, 0, 0.75);
+      cursor: grab;
+      transition: transform 0.15s ease, background 0.2s ease;
+    }
+
+    input[type="range"]#musicSeekSlider:hover::-webkit-slider-thumb,
+    input[type="range"]#musicSeekSlider:active::-webkit-slider-thumb {
+      transform: scale(1.2);
+      background: var(--accent);
+    }
+
+    .music-time {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: rgba(152, 160, 173, 0.65);
+      flex-shrink: 0;
+      min-width: 72px;
+      text-align: right;
+    }
+
+    /* 全局拖入音频文件的暗室提示遮罩 */
+    .drop-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      background: rgba(10, 11, 14, 0.78);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .drop-overlay.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .drop-card {
+      padding: 28px 40px;
+      border-radius: 16px;
+      border: 1px dashed rgba(230, 184, 115, 0.55);
+      background: rgba(20, 22, 28, 0.88);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .drop-card strong {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.03em;
+    }
+
+    .drop-card span {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    /* 抽屉内音乐导入卡片 */
+    .music-upload-card {
+      background: rgba(0, 0, 0, 0.32);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .music-track-info {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .music-track-name {
+      color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .music-track-name.empty {
+      color: var(--text-muted);
+    }
+
+    .music-track-meta {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+      flex-shrink: 0;
     }
 
     /* 仅在滑动/调频时显示的频率与属性 HUD */
@@ -808,8 +985,40 @@
           aria-label="声波频率调节 (100 - 4000 Hz)"
         />
       </div>
+
+      <!-- 音乐模式下的底部极简播控条 -->
+      <div class="music-bar" id="musicBar">
+        <button id="musicPlayBtn" class="music-mini-btn" type="button" title="播放 / 暂停" aria-label="播放或暂停音乐">
+          <svg id="playIconSvg" viewBox="0 0 24 24"><polygon points="7 4 20 12 7 20 7 4"></polygon></svg>
+          <svg id="pauseIconSvg" viewBox="0 0 24 24" style="display:none;"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+        </button>
+
+        <div class="music-progress-wrap">
+          <div class="slider-rail"></div>
+          <div class="slider-progress" id="musicProgress" style="width: 0%;"></div>
+          <input id="musicSeekSlider" type="range" min="0" max="1000" step="1" value="0" aria-label="音乐播放进度" />
+        </div>
+
+        <span class="music-time" id="musicTimeLabel">0:00 / 0:00</span>
+
+        <button id="exitMusicBtn" class="music-mini-btn" type="button" title="切回手动调频" aria-label="切回手动调频">
+          <svg viewBox="0 0 24 24" style="fill:none;stroke-width:2;"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
     </div>
   </main>
+
+  <!-- 隐藏的音频文件选择与播放器元素 -->
+  <input id="musicFileInput" type="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.aac" style="display:none;" />
+  <audio id="musicAudioEl" crossorigin="anonymous" preload="metadata"></audio>
+
+  <!-- 拖入音频文件提示层 -->
+  <div id="dropOverlay" class="drop-overlay" aria-hidden="true">
+    <div class="drop-card">
+      <strong>松开导入本地音乐</strong>
+      <span>支持 MP3 / WAV / M4A / FLAC · 声波板将随旋律与节拍实时共振</span>
+    </div>
+  </div>
 
   <!-- 侧边栏遮罩与抽屉 -->
   <div id="drawerBackdrop" class="drawer-backdrop"></div>
@@ -823,6 +1032,31 @@
     </div>
 
     <div class="drawer-body">
+      <!-- 驱动模式：手动调频 / 音乐驱动 -->
+      <div class="section">
+        <div class="section-label">
+          <span>声波驱动源</span>
+          <span id="driveModeTag">手动纯音</span>
+        </div>
+        <div class="segmented" role="tablist">
+          <button id="btnModeManual" class="active" type="button">手动调频</button>
+          <button id="btnModeMusic" type="button">音乐驱动</button>
+        </div>
+
+        <div class="music-upload-card">
+          <div class="music-track-info">
+            <span class="music-track-name empty" id="musicTrackName">未导入音乐（支持直接拖入页面）</span>
+            <span class="music-track-meta" id="musicTrackMeta"></span>
+          </div>
+          <div class="action-grid">
+            <button id="btnImportMusic" class="btn" type="button">♪ 导入本地音乐</button>
+            <button id="btnDrawerPlay" class="btn" type="button" disabled>▶ 播放</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
       <!-- 板型切换 -->
       <div class="section">
         <div class="section-label">
@@ -1090,6 +1324,7 @@
       // ============================================================
       const state = {
         shape: 'square',
+        driveMode: 'manual', // 'manual' | 'music'
         freq: 660,
         targetFreq: null,
         amplitude: 1.0,
@@ -1098,7 +1333,13 @@
         sweeping: false,
         resonanceLevel: 1.0,
         dominantLabel: 'Mode (2,1)-',
-        drawerOpen: false
+        drawerOpen: false,
+        // 音乐驱动运行时状态
+        musicLoaded: false,
+        musicPlaying: false,
+        musicTitle: '',
+        musicEnergy: 0,
+        beatKick: 0
       };
 
       const ampField = new Float32Array(FIELD_SIZE * FIELD_SIZE);
@@ -1240,7 +1481,17 @@
         const N = FIELD_SIZE;
         const nMinus1 = N - 1;
         const isCircle = state.shape === 'circle';
-        const energy = state.amplitude;
+        // 音乐模式下：激振强度随音乐响度与鼓点瞬态动态起伏，静音停顿时沙粒静静定格
+        let energy = state.amplitude;
+        if (state.driveMode === 'music') {
+          if (!state.musicPlaying) {
+            energy = 0;
+          } else {
+            energy = state.amplitude * (0.12 + state.musicEnergy * 1.15 + state.beatKick * 1.1);
+          }
+        }
+        if (energy <= 0.002) return;
+
         const freqScale = 0.85 + 0.35 * (1 - Math.log(state.freq / MIN_FREQ) / Math.log(MAX_FREQ / MIN_FREQ));
         const maxJump = 0.024 * energy * freqScale;
         const driftGain = 0.042 * energy;
@@ -1437,37 +1688,172 @@
       }
 
       // ============================================================
-      // 6. Web Audio API 实时正弦波声源
+      // 6. Web Audio API（手动纯音振荡器 + 本地音乐频谱分析器）
       // ============================================================
       let audioCtx = null;
       let osc = null;
       let gainNode = null;
+      let musicSourceNode = null;
+      let analyserNode = null;
+      let musicGainNode = null;
+      let freqBinData = null;
+
+      const musicAudioEl = document.getElementById('musicAudioEl');
+      let musicObjectUrl = null;
 
       function initAudioIfNeeded() {
         if (audioCtx) return;
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         audioCtx = new AudioContextClass();
+
+        // 手动纯音通道
         osc = audioCtx.createOscillator();
         gainNode = audioCtx.createGain();
-
         osc.type = 'sine';
         osc.frequency.value = state.freq;
         gainNode.gain.value = 0.0001;
-
         osc.connect(gainNode);
         gainNode.connect(audioCtx.destination);
         osc.start();
+
+        // 音乐分析与播放通道
+        musicSourceNode = audioCtx.createMediaElementSource(musicAudioEl);
+        analyserNode = audioCtx.createAnalyser();
+        analyserNode.fftSize = 2048;
+        analyserNode.smoothingTimeConstant = 0.72;
+        freqBinData = new Uint8Array(analyserNode.frequencyBinCount);
+
+        musicGainNode = audioCtx.createGain();
+        musicGainNode.gain.value = 0.65;
+
+        musicSourceNode.connect(analyserNode);
+        analyserNode.connect(musicGainNode);
+        musicGainNode.connect(audioCtx.destination);
       }
 
       function syncAudio() {
         if (!audioCtx || !osc || !gainNode) return;
         const now = audioCtx.currentTime;
         osc.frequency.setTargetAtTime(state.freq, now, 0.025);
+
+        // 手动模式发纯音；音乐模式静音纯音、播放音乐
+        const manualActive = state.audioOn && state.driveMode === 'manual';
         const highFreqAtten = state.freq > 1200
           ? 1 / (1 + (state.freq - 1200) / 1800)
           : 1.0;
-        const targetGain = state.audioOn ? Math.max(0.0001, state.volume * highFreqAtten) : 0.0001;
-        gainNode.gain.setTargetAtTime(targetGain, now, 0.04);
+        const targetOscGain = manualActive ? Math.max(0.0001, state.volume * highFreqAtten) : 0.0001;
+        gainNode.gain.setTargetAtTime(targetOscGain, now, 0.04);
+
+        if (musicGainNode) {
+          // 音乐音量映射到舒适听感区间 (0 ~ 1.0)
+          const musicVol = state.audioOn ? Math.min(1, (state.volume / 0.35) * 2.0) : 0.0001;
+          musicGainNode.gain.setTargetAtTime(Math.max(0.0001, musicVol), now, 0.04);
+        }
+      }
+
+      // 音乐频谱 → 克拉尼物理共振模态追踪引擎
+      const musicTracker = {
+        avgBass: 0,
+        lastSwitchTime: 0,
+        lockedModeIdx: 3,
+        smoothFreq: 660,
+        lastFieldUpdateTime: 0
+      };
+
+      function analyzeMusicAndDrive(nowMs, dt) {
+        if (state.driveMode !== 'music' || !state.musicPlaying || !analyserNode || !freqBinData) {
+          state.musicEnergy *= 0.9;
+          state.beatKick *= 0.85;
+          return;
+        }
+
+        analyserNode.getByteFrequencyData(freqBinData);
+        const sampleRate = audioCtx ? audioCtx.sampleRate : 44100;
+        const binHz = sampleRate / analyserNode.fftSize;
+        const binCount = freqBinData.length;
+
+        let bassSum = 0, bassCnt = 0;
+        let totalSum = 0, totalCnt = 0;
+        let weightedHzSum = 0, weightSum = 0;
+
+        for (let i = 1; i < binCount; i++) {
+          const hz = i * binHz;
+          if (hz > 4200) break;
+          const v = freqBinData[i] / 255;
+
+          if (hz >= 55 && hz <= 220) {
+            bassSum += v;
+            bassCnt++;
+          }
+          if (hz >= 60 && hz <= 3800) {
+            totalSum += v;
+            totalCnt++;
+            // 用能量平方加权突出主旋律/主音色频段
+            const w = v * v;
+            weightedHzSum += hz * w;
+            weightSum += w;
+          }
+        }
+
+        const bass = bassCnt > 0 ? bassSum / bassCnt : 0;
+        const rms = totalCnt > 0 ? totalSum / totalCnt : 0;
+        const centroidHz = weightSum > 0.001 ? weightedHzSum / weightSum : 420;
+
+        // 动态低音基线与鼓点瞬态检测
+        musicTracker.avgBass = musicTracker.avgBass * 0.92 + bass * 0.08;
+        const bassFlux = Math.max(0, bass - musicTracker.avgBass);
+
+        // 平滑更新响度包络与鼓点冲击
+        state.musicEnergy = state.musicEnergy * 0.78 + Math.min(1, rms * 2.4) * 0.22;
+        if (bassFlux > 0.085) {
+          state.beatKick = Math.min(1, state.beatKick + bassFlux * 2.8);
+        } else {
+          state.beatKick *= Math.pow(0.06, dt);
+        }
+
+        // 将音乐频谱质心映射到一个合适的物理模态（兼顾低/中/高阶图案多样性）
+        const modes = state.shape === 'square' ? SQUARE_MODES : CIRCLE_MODES;
+        // 音乐频谱质心大多落在 200~1800 Hz，做温和对数展宽覆盖 138~3600 Hz
+        const normLog = Math.max(0, Math.min(1, (Math.log(Math.max(120, centroidHz)) - Math.log(140)) / (Math.log(2200) - Math.log(140))));
+        const mappedFreq = Math.exp(Math.log(modes[0].f) + normLog * (Math.log(modes[modes.length - 1].f) - Math.log(modes[0].f)));
+
+        // 找到离 mappedFreq 最近的物理本征模态
+        let candidateIdx = 0;
+        let minDiff = Infinity;
+        for (let i = 0; i < modes.length; i++) {
+          const d = Math.abs(modes[i].f - mappedFreq);
+          if (d < minDiff) {
+            minDiff = d;
+            candidateIdx = i;
+          }
+        }
+
+        // 节拍锁模：满足冷却时间 + (强鼓点冲击 或 频段显著跃迁) 时切换锁定模态，保证沙粒有足够时间聚出清晰几何图
+        const elapsedSinceSwitch = nowMs - musicTracker.lastSwitchTime;
+        const modeJump = Math.abs(candidateIdx - musicTracker.lockedModeIdx);
+        const strongBeat = bassFlux > 0.115 && elapsedSinceSwitch > 680;
+        const melodicShift = modeJump >= 2 && elapsedSinceSwitch > 950 && rms > 0.08;
+
+        if (strongBeat || melodicShift) {
+          // 鼓点触发时如果刚好还在同一模态，则顺延相邻模态让视觉有明显节奏换图感
+          if (candidateIdx === musicTracker.lockedModeIdx && strongBeat) {
+            const stepDir = bass > 0.52 ? 1 : -1;
+            candidateIdx = Math.max(0, Math.min(modes.length - 1, candidateIdx + stepDir));
+          }
+          musicTracker.lockedModeIdx = candidateIdx;
+          musicTracker.lastSwitchTime = nowMs;
+        }
+
+        const lockedMode = modes[Math.min(musicTracker.lockedModeIdx, modes.length - 1)];
+        // 目标频率向锁定模态丝滑靠拢（保留极轻微音乐律动偏移）
+        const targetF = lockedMode.f + (mappedFreq - lockedMode.f) * 0.08;
+        musicTracker.smoothFreq += (targetF - musicTracker.smoothFreq) * Math.min(1, dt * 6.5);
+
+        // 节流重算振场（每秒最多 ~22 次），兼顾 60fps 丝滑和极低 CPU 占用
+        if (nowMs - musicTracker.lastFieldUpdateTime > 45 && Math.abs(musicTracker.smoothFreq - state.freq) >= 1) {
+          musicTracker.lastFieldUpdateTime = nowMs;
+          setFrequency(musicTracker.smoothFreq, false, false);
+        }
       }
 
       function syncAudioUI() {
@@ -1525,6 +1911,23 @@
       const modeBadge = document.getElementById('modeBadge');
       const resonanceStatus = document.getElementById('resonanceStatus');
       const resonanceBar = document.getElementById('resonanceBar');
+      const btnModeManual = document.getElementById('btnModeManual');
+      const btnModeMusic = document.getElementById('btnModeMusic');
+      const driveModeTag = document.getElementById('driveModeTag');
+      const musicFileInput = document.getElementById('musicFileInput');
+      const btnImportMusic = document.getElementById('btnImportMusic');
+      const btnDrawerPlay = document.getElementById('btnDrawerPlay');
+      const musicTrackName = document.getElementById('musicTrackName');
+      const musicTrackMeta = document.getElementById('musicTrackMeta');
+      const musicPlayBtn = document.getElementById('musicPlayBtn');
+      const playIconSvg = document.getElementById('playIconSvg');
+      const pauseIconSvg = document.getElementById('pauseIconSvg');
+      const musicSeekSlider = document.getElementById('musicSeekSlider');
+      const musicProgress = document.getElementById('musicProgress');
+      const musicTimeLabel = document.getElementById('musicTimeLabel');
+      const exitMusicBtn = document.getElementById('exitMusicBtn');
+      const dropOverlay = document.getElementById('dropOverlay');
+
       const btnSquare = document.getElementById('btnSquare');
       const btnCircle = document.getElementById('btnCircle');
       const btnAudio = document.getElementById('btnAudio');
@@ -1708,6 +2111,178 @@
         });
       });
 
+      function formatTime(sec) {
+        if (!Number.isFinite(sec) || sec < 0) return '0:00';
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60);
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+      }
+
+      function syncMusicPlayUI() {
+        const playing = state.musicPlaying;
+        playIconSvg.style.display = playing ? 'none' : 'block';
+        pauseIconSvg.style.display = playing ? 'block' : 'none';
+        btnDrawerPlay.disabled = !state.musicLoaded;
+        btnDrawerPlay.classList.toggle('btn-active', playing);
+        btnDrawerPlay.textContent = playing ? '⏸ 暂停' : '▶ 播放';
+      }
+
+      function setDriveMode(mode) {
+        if (mode === 'music' && !state.musicLoaded) {
+          // 尚未导入音乐时直接唤起文件选择
+          musicFileInput.click();
+          return;
+        }
+        state.driveMode = mode;
+        const isMusic = mode === 'music';
+        btnModeManual.classList.toggle('active', !isMusic);
+        btnModeMusic.classList.toggle('active', isMusic);
+        driveModeTag.textContent = isMusic ? '本地音乐驱动' : '手动纯音';
+        tunerDock.classList.toggle('music-mode', isMusic);
+
+        if (isMusic) {
+          state.sweeping = false;
+          state.targetFreq = null;
+          btnSweep.classList.remove('btn-active');
+          btnSweep.textContent = '▶ 自动扫频';
+          showHudTemporarily(2000);
+        } else {
+          if (!musicAudioEl.paused) {
+            musicAudioEl.pause();
+          }
+          state.musicPlaying = false;
+          syncMusicPlayUI();
+        }
+        syncAudio();
+      }
+
+      function loadMusicFile(file) {
+        if (!file) return;
+        initAudioIfNeeded();
+        if (audioCtx && audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+
+        if (musicObjectUrl) URL.revokeObjectURL(musicObjectUrl);
+        musicObjectUrl = URL.createObjectURL(file);
+        musicAudioEl.src = musicObjectUrl;
+        musicAudioEl.load();
+
+        state.musicLoaded = true;
+        state.musicTitle = file.name.replace(/\.[^/.]+$/, '');
+        musicTrackName.textContent = state.musicTitle;
+        musicTrackName.classList.remove('empty');
+        musicTrackMeta.textContent = '就绪';
+
+        setDriveMode('music');
+        // 导入后自动开始播放并驱动沙粒
+        musicAudioEl.play().then(() => {
+          state.musicPlaying = true;
+          syncMusicPlayUI();
+          syncAudio();
+          showHudTemporarily(2200);
+        }).catch(() => {
+          state.musicPlaying = false;
+          syncMusicPlayUI();
+        });
+      }
+
+      function toggleMusicPlay() {
+        if (!state.musicLoaded) {
+          musicFileInput.click();
+          return;
+        }
+        initAudioIfNeeded();
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+        if (state.driveMode !== 'music') setDriveMode('music');
+
+        if (musicAudioEl.paused) {
+          musicAudioEl.play().then(() => {
+            state.musicPlaying = true;
+            syncMusicPlayUI();
+            syncAudio();
+          }).catch(() => {});
+        } else {
+          musicAudioEl.pause();
+          state.musicPlaying = false;
+          syncMusicPlayUI();
+        }
+      }
+
+      btnModeManual.addEventListener('click', () => setDriveMode('manual'));
+      btnModeMusic.addEventListener('click', () => setDriveMode('music'));
+      btnImportMusic.addEventListener('click', () => musicFileInput.click());
+      btnDrawerPlay.addEventListener('click', toggleMusicPlay);
+      musicPlayBtn.addEventListener('click', toggleMusicPlay);
+      exitMusicBtn.addEventListener('click', () => setDriveMode('manual'));
+
+      musicFileInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (file) loadMusicFile(file);
+        musicFileInput.value = '';
+      });
+
+      musicAudioEl.addEventListener('loadedmetadata', () => {
+        const dur = formatTime(musicAudioEl.duration);
+        musicTrackMeta.textContent = dur;
+        musicTimeLabel.textContent = `0:00 / ${dur}`;
+      });
+
+      musicAudioEl.addEventListener('ended', () => {
+        state.musicPlaying = false;
+        syncMusicPlayUI();
+      });
+
+      // 音乐进度条拖拽定位
+      let isSeekingMusic = false;
+      musicSeekSlider.addEventListener('pointerdown', () => {
+        isSeekingMusic = true;
+        showHudTemporarily(1800);
+      });
+      window.addEventListener('pointerup', () => { isSeekingMusic = false; });
+      musicSeekSlider.addEventListener('input', (e) => {
+        const frac = Number(e.target.value) / 1000;
+        musicProgress.style.width = `${frac * 100}%`;
+        if (Number.isFinite(musicAudioEl.duration) && musicAudioEl.duration > 0) {
+          musicAudioEl.currentTime = frac * musicAudioEl.duration;
+          musicTimeLabel.textContent = `${formatTime(musicAudioEl.currentTime)} / ${formatTime(musicAudioEl.duration)}`;
+        }
+        showHudTemporarily(1500);
+      });
+
+      // 鼠标悬停底部音乐条时轻柔显示当前追踪频率与模态
+      tunerDock.addEventListener('pointerenter', () => {
+        if (state.driveMode === 'music') showHudTemporarily(2000);
+      });
+
+      // 全局拖拽本地音乐文件导入
+      let dragDepth = 0;
+      window.addEventListener('dragenter', (e) => {
+        if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+          e.preventDefault();
+          dragDepth++;
+          dropOverlay.classList.add('visible');
+        }
+      });
+      window.addEventListener('dragover', (e) => {
+        if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
+          e.preventDefault();
+        }
+      });
+      window.addEventListener('dragleave', () => {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) dropOverlay.classList.remove('visible');
+      });
+      window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragDepth = 0;
+        dropOverlay.classList.remove('visible');
+        const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (file && (file.type.startsWith('audio/') || /\.(mp3|wav|m4a|flac|ogg|aac)$/i.test(file.name))) {
+          loadMusicFile(file);
+        }
+      });
+
       btnSquare.addEventListener('click', () => switchShape('square'));
       btnCircle.addEventListener('click', () => switchShape('circle'));
       audioToggleBtn.addEventListener('click', toggleAudio);
@@ -1790,8 +2365,12 @@
         if (document.activeElement === freqNumberInput) return;
         if (e.code === 'Space') {
           e.preventDefault();
-          toggleAudio();
-        } else if (e.key === 'ArrowRight') {
+          if (state.driveMode === 'music') {
+            toggleMusicPlay();
+          } else {
+            toggleAudio();
+          }
+        } else if (e.key === 'ArrowRight' && state.driveMode === 'manual') {
           e.preventDefault();
           state.targetFreq = null;
           setFrequency(state.freq + (e.shiftKey ? 10 : 1), false, true);
@@ -1811,7 +2390,15 @@
         const dt = Math.min(0.05, (now - lastTime) / 1000);
         lastTime = now;
 
-        if (state.targetFreq !== null) {
+        if (state.driveMode === 'music') {
+          analyzeMusicAndDrive(now, dt);
+          if (state.musicLoaded && !isSeekingMusic && Number.isFinite(musicAudioEl.duration) && musicAudioEl.duration > 0) {
+            const frac = musicAudioEl.currentTime / musicAudioEl.duration;
+            musicSeekSlider.value = Math.round(frac * 1000);
+            musicProgress.style.width = `${frac * 100}%`;
+            musicTimeLabel.textContent = `${formatTime(musicAudioEl.currentTime)} / ${formatTime(musicAudioEl.duration)}`;
+          }
+        } else if (state.targetFreq !== null) {
           const diff = state.targetFreq - state.freq;
           if (Math.abs(diff) <= 1.2) {
             setFrequency(state.targetFreq, false, true);
